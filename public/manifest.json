@@ -4,15 +4,42 @@
   "start_url": "/opnjrnl/",
   "id": "/opnjrnl/",
   "display": "standalone",
+  "orientation": "any",
   "background_color": "#FAF9F6",
   "theme_color": "#FAF9F6",
   "description": "An open offline-first minimal journal.",
   "icons": [
     {
       "src": "icon.svg",
-      "sizes": "192x192 512x512",
+      "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "https://placehold.co/192x192/18181b/ffffff.png?text=opnjrnl",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "https://placehold.co/512x512/18181b/ffffff.png?text=opnjrnl",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "https://placehold.co/1280x720/18181b/ffffff.png?text=opnjrnl+Dashboard",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide"
+    },
+    {
+      "src": "https://placehold.co/750x1334/18181b/ffffff.png?text=opnjrnl+Mobile",
+      "sizes": "750x1334",
+      "type": "image/png",
+      "form_factor": "narrow"
     }
   ]
 }
