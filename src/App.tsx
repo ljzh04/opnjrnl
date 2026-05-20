@@ -229,7 +229,11 @@ export default function App() {
     }
   };
 
-  const handleUndoDelete = () => {
+  const handleUndoDelete = (e?: any) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     if (deletedEntryState) {
       setEntries(current => [deletedEntryState.entry, ...current].sort((a, b) => b.createdAt - a.createdAt));
       setActiveEntryId(deletedEntryState.entry.id);
@@ -508,15 +512,20 @@ export default function App() {
       {/* Undo Toast */}
       {deletedEntryState && (
         <div 
-          className="fixed bottom-6 md:bottom-10 left-1/2 -translate-x-1/2 z-50 flex items-center justify-between gap-6 px-5 py-3.5 rounded-full shadow-lg border text-sm font-sans"
+          className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 flex items-center justify-between gap-6 px-5 py-3.5 rounded-full shadow-lg border text-sm font-sans"
           style={{ 
             backgroundColor: currentTheme.surface, 
             borderColor: currentTheme.surfaceBorder,
             color: currentTheme.textPrimary
           }}
+          onClick={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+          }}
         >
-          <span className="font-medium tracking-wide">Page moved to trash.</span>
+          <span className="font-medium tracking-wide">Deleted</span>
           <button 
+            type="button"
             onClick={handleUndoDelete}
             className="font-bold cursor-pointer active:opacity-70 transition-opacity uppercase tracking-widest text-[11px]"
             style={{ color: currentTheme.textSecondary }}
