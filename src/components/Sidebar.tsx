@@ -1,6 +1,7 @@
 import { JournalEntry, MinimalTheme } from '../types';
 import { format } from 'date-fns';
 import { MOOD_SCALE } from '../themeData';
+import { registerDeviceLock } from '../lib/webauthn';
 import { 
   Plus, 
   Search, 
@@ -48,6 +49,13 @@ interface SidebarProps {
   onImport: (e: ChangeEvent<HTMLInputElement>) => void;
   onConnectDrive?: () => void;
   driveConnected?: boolean;
+  appPassword?: string | null;
+  onUpdateAppPassword?: (pwd: string | null) => void;
+  systemLockId?: string | null;
+  onUpdateSystemLock?: (id: string | null) => void;
+  notificationsEnabled?: boolean;
+  notificationTime?: string;
+  onUpdateNotifications?: (enabled: boolean, time: string) => void;
 }
 
 export default function Sidebar({
@@ -68,10 +76,20 @@ export default function Sidebar({
   onExport,
   onImport,
   onConnectDrive,
-  driveConnected
+  driveConnected,
+  appPassword,
+  onUpdateAppPassword,
+  systemLockId,
+  onUpdateSystemLock,
+  notificationsEnabled,
+  notificationTime,
+  onUpdateNotifications
 }: SidebarProps) {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showPasswordSetup, setShowPasswordSetup] = useState(false);
+  const [showPasswordRemove, setShowPasswordRemove] = useState(false);
+  const [showDeviceLockRemove, setShowDeviceLockRemove] = useState(false);
 
   // Fuzzy Search Utility
   const fuzzyMatch = (content: string, query: string) => {
@@ -251,6 +269,157 @@ export default function Sidebar({
                     <Cloud className="w-4 h-4" />
                     <span>{driveConnected ? 'Syncing to Drive (Connected)' : 'Connect Google Drive'}</span>
                   </button>
+                </div>
+              </div>
+
+              {/* App Lock */}
+              <div className="flex flex-col gap-3">
+                <span className="text-[10px] font-bold tracking-widest uppercase opacity-40">Privacy</span>
+                <div 
+                  className="rounded-xl border p-4 flex flex-col gap-5 text-xs"
+                  style={{ borderColor: theme.surfaceBorder, backgroundColor: theme.surface }}
+                >
+                  <div className="flex flex-col gap-2">
+                    <div className="flex justify-between items-center">
+                      <span className="font-semibold tracking-wide">Device Screen Lock</span>
+                      {!systemLockId && (
+                        <button
+                          className="px-3 py-1 bg-black/5 dark:bg-white/5 active:bg-black/10 dark:active:bg-white/10 rounded-lg opacity-80 active:opacity-100 transition-colors"
+                          onClick={async () => {
+                            const newId = await registerDeviceLock();
+                            if (newId) onUpdateSystemLock?.(newId);
+                          }}
+                        >
+                          Enable
+                        </button>
+                      )}
+                      {systemLockId && !showDeviceLockRemove && (
+                        <button
+                          className="px-3 py-1 bg-black/5 dark:bg-white/5 active:bg-black/10 dark:active:bg-white/10 rounded-lg opacity-80 active:opacity-100 transition-colors"
+                          onClick={() => setShowDeviceLockRemove(true)}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                    {showDeviceLockRemove && (
+                      <div className="flex flex-col gap-2 mt-2 pt-2 border-t" style={{ borderColor: theme.surfaceBorder }}>
+                        <p className="opacity-80">Remove device lock?</p>
+                        <div className="flex justify-end gap-2 mt-1">
+                          <button onClick={() => setShowDeviceLockRemove(false)} className="px-3 py-1.5 opacity-60">Cancel</button>
+                          <button onClick={() => { onUpdateSystemLock?.(null); setShowDeviceLockRemove(false); }} className="px-3 py-1.5 rounded bg-rose-500 text-white font-medium shadow-sm transition-all active:scale-95">Remove</button>
+                        </div>
+                      </div>
+                    )}
+                    {systemLockId && !showDeviceLockRemove && (
+                      <div className="flex justify-between items-center">
+                        <span className="opacity-60">Status</span>
+                        <span className="text-emerald-500 font-medium">Protected (Biometrics/PIN)</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="border-t" style={{ borderColor: theme.surfaceBorder }}></div>
+
+                  <div className="flex flex-col gap-2">
+                    <div className="flex justify-between items-center">
+                      <span className="font-semibold tracking-wide">Journal Password</span>
+                      {!appPassword && !showPasswordSetup && (
+                        <button
+                          className="px-3 py-1 bg-black/5 dark:bg-white/5 active:bg-black/10 dark:active:bg-white/10 rounded-lg opacity-80 active:opacity-100 transition-colors"
+                          onClick={() => setShowPasswordSetup(true)}
+                        >
+                          Set Password
+                        </button>
+                      )}
+                      {appPassword && !showPasswordRemove && (
+                        <button
+                          className="px-3 py-1 bg-black/5 dark:bg-white/5 active:bg-black/10 dark:active:bg-white/10 rounded-lg opacity-80 active:opacity-100 transition-colors"
+                          onClick={() => setShowPasswordRemove(true)}
+                        >
+                          Remove Password
+                        </button>
+                      )}
+                    </div>
+                    
+                    {showPasswordSetup && (
+                      <form 
+                        className="flex flex-col gap-2 mt-2 pt-2 border-t"
+                        style={{ borderColor: theme.surfaceBorder }}
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          const val = (e.currentTarget.elements.namedItem('newpwd') as HTMLInputElement).value;
+                          if (val) {
+                            onUpdateAppPassword?.(val);
+                            setShowPasswordSetup(false);
+                          }
+                        }}
+                      >
+                        <input 
+                          type="password"
+                          name="newpwd"
+                          placeholder="Enter new password"
+                          autoFocus
+                          className="px-3 py-2 rounded border bg-transparent outline-none"
+                          style={{ borderColor: theme.surfaceBorder }}
+                        />
+                        <div className="flex justify-end gap-2 mt-1">
+                          <button type="button" onClick={() => setShowPasswordSetup(false)} className="px-3 py-1.5 opacity-60">Cancel</button>
+                          <button type="submit" className="px-3 py-1.5 rounded text-white font-medium shadow-sm transition-all active:scale-95" style={{ backgroundColor: theme.accent }}>Save</button>
+                        </div>
+                      </form>
+                    )}
+
+                    {showPasswordRemove && (
+                      <div className="flex flex-col gap-2 mt-2 pt-2 border-t" style={{ borderColor: theme.surfaceBorder }}>
+                        <p className="opacity-80">Are you sure you want to remove the password?</p>
+                        <div className="flex justify-end gap-2 mt-1">
+                          <button onClick={() => setShowPasswordRemove(false)} className="px-3 py-1.5 opacity-60">Cancel</button>
+                          <button onClick={() => { onUpdateAppPassword?.(null); setShowPasswordRemove(false); }} className="px-3 py-1.5 rounded bg-rose-500 text-white font-medium shadow-sm transition-all active:scale-95">Remove</button>
+                        </div>
+                      </div>
+                    )}
+
+                    {appPassword && !showPasswordRemove && (
+                      <div className="flex justify-between items-center mt-1">
+                        <span className="opacity-60">Status</span>
+                        <span className="text-emerald-500 font-medium">Protected (Custom Password)</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Push Notifications */}
+              <div className="flex flex-col gap-3">
+                <span className="text-[10px] font-bold tracking-widest uppercase opacity-40">Reminders</span>
+                <div 
+                  className="rounded-xl border p-4 flex flex-col gap-4 text-xs"
+                  style={{ borderColor: theme.surfaceBorder, backgroundColor: theme.surface }}
+                >
+                  <label className="flex justify-between items-center cursor-pointer">
+                    <span className="font-semibold tracking-wide">Daily Reminder</span>
+                    <input 
+                      type="checkbox"
+                      checked={!!notificationsEnabled}
+                      onChange={(e) => onUpdateNotifications?.(e.target.checked, notificationTime || "20:00")}
+                      className="w-4 h-4 cursor-pointer accent-current" 
+                      style={{ accentColor: theme.accent }}
+                    />
+                  </label>
+                  
+                  {notificationsEnabled && (
+                    <div className="flex justify-between items-center opacity-80 pt-2 border-t" style={{ borderColor: theme.surfaceBorder }}>
+                      <span>Reminder Time</span>
+                      <input 
+                        type="time" 
+                        value={notificationTime || "20:00"}
+                        onChange={(e) => onUpdateNotifications?.(true, e.target.value)}
+                        className="bg-transparent border rounded px-2 py-1 outline-none text-xs"
+                        style={{ borderColor: theme.surfaceBorder }}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
 

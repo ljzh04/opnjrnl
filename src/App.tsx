@@ -12,10 +12,14 @@ import { v4 as uuidv4 } from 'uuid';
 import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { get, set } from 'idb-keyval';
 import { initAuth, googleSignIn, getAccessToken } from './lib/auth';
+import { registerDeviceLock, verifyDeviceLock } from './lib/webauthn';
 
 const ENTRIES_STORAGE_KEY = 'minimal-journal-entries';
 const THEME_STORAGE_KEY = 'minimal-journal-theme';
 const DRIVE_FILE_ID_KEY = 'minimal-journal-drive-file-id';
+const APP_PASSWORD_KEY = 'minimal-journal-password';
+const APP_SYSLOCK_KEY = 'minimal-journal-syslock';
+const APP_SETTINGS_KEY = 'minimal-journal-settings';
 
 export default function App() {
   const [entries, setEntries] = useState<JournalEntry[]>([]);
@@ -23,7 +27,14 @@ export default function App() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [activeEntryId, setActiveEntryId] = useState<string | null>(null);
 
-  // Search & Filtering States
+  // App Lock & Settings
+  const [appLocked, setAppLocked] = useState<boolean>(false);
+  const [appPassword, setAppPassword] = useState<string | null>(null);
+  const [systemLockId, setSystemLockId] = useState<string | null>(null);
+  const [pwdError, setPwdError] = useState<boolean>(false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(false);
+  const [notificationTime, setNotificationTime] = useState<string>("20:00");
+
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
@@ -43,8 +54,11 @@ export default function App() {
   useEffect(() => {
     Promise.all([
       get<JournalEntry[]>(ENTRIES_STORAGE_KEY),
-      get<MinimalThemeId>(THEME_STORAGE_KEY)
-    ]).then(([storedEntries, storedThemeId]) => {
+      get<MinimalThemeId>(THEME_STORAGE_KEY),
+      get<string | null>(APP_PASSWORD_KEY),
+      get<string | null>(APP_SYSLOCK_KEY),
+      get<{ notificationsEnabled: boolean, notificationTime: string }>(APP_SETTINGS_KEY)
+    ]).then(([storedEntries, storedThemeId, storedPassword, storedSyslock, storedSettings]) => {
       if (storedEntries) {
         // Ensure all historical entries have a tags array to avoid runtime crashes
         const polished = storedEntries.map(entry => ({
@@ -56,11 +70,28 @@ export default function App() {
       if (storedThemeId && MINIMAL_THEMES[storedThemeId]) {
         setThemeId(storedThemeId);
       }
+      if (storedPassword) {
+        setAppPassword(storedPassword);
+        setAppLocked(true);
+      }
+      if (storedSyslock) {
+        setSystemLockId(storedSyslock);
+        setAppLocked(true);
+      }
+      if (storedSettings) {
+        setNotificationsEnabled(storedSettings.notificationsEnabled);
+        setNotificationTime(storedSettings.notificationTime || "20:00");
+      }
       setIsLoaded(true);
     }).catch((err) => {
       console.error("IndexedDB load error:", err);
       setIsLoaded(true); // Proceed anyway with default values
     });
+
+    // Request notification permission on load just in case (if we want to use them)
+    if ("Notification" in window) {
+       Notification.requestPermission();
+    }
 
     // Initialize Auth
     initAuth(
@@ -264,6 +295,37 @@ export default function App() {
     }
   };
 
+  // Notification Daemon Loop
+  useEffect(() => {
+    if (!notificationsEnabled || !notificationTime) return;
+    
+    // Check every minute
+    const interval = setInterval(() => {
+      const now = new Date();
+      const currentHours = now.getHours().toString().padStart(2, '0');
+      const currentMinutes = now.getMinutes().toString().padStart(2, '0');
+      const currentTimeStr = `${currentHours}:${currentMinutes}`;
+      
+      if (currentTimeStr === notificationTime) {
+        // We only want to trigger it once during that minute.
+        // We'll use a localStorage flag to prevent multi-firing within the same day
+        const todayStr = new Date().toDateString();
+        const lastFired = localStorage.getItem('last-notif-fired');
+        if (lastFired !== todayStr) {
+          if ("Notification" in window && Notification.permission === "granted") {
+            new Notification("Journal Reminder", {
+              body: "Time to log your day in your journal.",
+              icon: "/icon.svg"
+            });
+            localStorage.setItem('last-notif-fired', todayStr);
+          }
+        }
+      }
+    }, 60000); // checks every minute...
+
+    return () => clearInterval(interval);
+  }, [notificationsEnabled, notificationTime]);
+
   const currentTheme = MINIMAL_THEMES[themeId] || MINIMAL_THEMES.paper;
   const activeEntry = entries.find(e => e.id === activeEntryId) || null;
 
@@ -272,6 +334,80 @@ export default function App() {
       <div className="h-[100dvh] w-full bg-zinc-50 flex flex-col gap-3 items-center justify-center font-sans text-xs tracking-wider text-zinc-400 select-none">
         <RefreshCw className="w-5 h-5 text-zinc-300 animate-spin" />
         <span>Restoring database...</span>
+      </div>
+    );
+  }
+
+  if (appLocked) {
+    return (
+      <div 
+        className="h-[100dvh] w-full flex flex-col gap-6 items-center justify-center font-sans text-xs tracking-wider select-none px-6"
+        style={{ backgroundColor: currentTheme.background, color: currentTheme.textPrimary }}
+      >
+        <div className="w-12 h-12 rounded-full border flex items-center justify-center shadow-sm" style={{ borderColor: currentTheme.surfaceBorder, backgroundColor: currentTheme.surface }}>
+          <div className="w-4 h-4 rounded-full" style={{ backgroundColor: currentTheme.textPrimary }}></div>
+        </div>
+        <div className="flex flex-col items-center gap-2">
+          <h1 className="font-serif text-xl tracking-tight">Journal Locked</h1>
+          <p className="opacity-50">Authenticate to continue</p>
+        </div>
+        
+        {systemLockId && (
+          <button 
+            type="button"
+            onClick={async () => {
+              const success = await verifyDeviceLock(systemLockId);
+              if (success) {
+                setAppLocked(false);
+                setPwdError(false);
+              }
+            }}
+            className="w-full max-w-[240px] px-4 py-3 rounded-lg font-bold tracking-widest uppercase transition-all mt-4 shadow-sm active:scale-95 text-white"
+            style={{ backgroundColor: currentTheme.accent }}
+          >
+            Use Device Lock
+          </button>
+        )}
+
+        {appPassword && (
+        <form 
+          className="flex flex-col gap-3 w-full max-w-[240px] mt-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const val = (e.currentTarget.elements.namedItem('pwd') as HTMLInputElement).value;
+            if (val === appPassword) {
+              setAppLocked(false);
+              setPwdError(false);
+            } else {
+              setPwdError(true);
+            }
+          }}
+        >
+          <div>
+            <input 
+              type="password" 
+              name="pwd"
+              placeholder="Password" 
+              autoFocus
+              onChange={() => setPwdError(false)}
+              className="w-full px-4 py-3 rounded-lg border text-center tracking-widest outline-none focus:border-zinc-400 transition-all font-mono"
+              style={{ 
+                borderColor: pwdError ? '#f43f5e' : currentTheme.surfaceBorder, 
+                backgroundColor: currentTheme.surface, 
+                color: currentTheme.textPrimary 
+              }}
+            />
+            {pwdError && <p className="text-rose-500 text-[10px] uppercase font-bold mt-2 text-center tracking-widest">Incorrect password</p>}
+          </div>
+            <button 
+              type="submit"
+              className="w-full px-4 py-3 rounded-lg font-bold tracking-widest uppercase transition-all my-2 shadow-sm active:scale-95 text-white opacity-90"
+              style={{ backgroundColor: currentTheme.accent }}
+            >
+              Unlock
+            </button>
+          </form>
+        )}
       </div>
     );
   }
@@ -309,6 +445,26 @@ export default function App() {
           onImport={handleImportData}
           onConnectDrive={handleConnectDrive}
           driveConnected={driveConnected}
+          appPassword={appPassword}
+          onUpdateAppPassword={(pwd) => {
+            setAppPassword(pwd);
+            set(APP_PASSWORD_KEY, pwd).catch(console.error);
+          }}
+          systemLockId={systemLockId}
+          onUpdateSystemLock={(id) => {
+            setSystemLockId(id);
+            set(APP_SYSLOCK_KEY, id).catch(console.error);
+          }}
+          notificationsEnabled={notificationsEnabled}
+          notificationTime={notificationTime}
+          onUpdateNotifications={(enabled, time) => {
+            setNotificationsEnabled(enabled);
+            setNotificationTime(time);
+            set(APP_SETTINGS_KEY, { notificationsEnabled: enabled, notificationTime: time }).catch(console.error);
+            if (enabled && "Notification" in window) {
+               Notification.requestPermission();
+            }
+          }}
         />
       </div>
 
