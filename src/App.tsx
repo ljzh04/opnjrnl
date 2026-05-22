@@ -11,7 +11,7 @@ import Editor from './components/Editor';
 import { v4 as uuidv4 } from 'uuid';
 import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { get, set } from 'idb-keyval';
-import { initAuth, googleSignIn, getAccessToken } from './lib/auth';
+import { initAuth, googleSignIn, getAccessToken, logout } from './lib/auth';
 import { registerDeviceLock, verifyDeviceLock } from './lib/webauthn';
 
 const ENTRIES_STORAGE_KEY = 'minimal-journal-entries';
@@ -152,6 +152,18 @@ export default function App() {
   }, []);
 
   const handleConnectDrive = async () => {
+    if (driveConnected) {
+      if (confirm("Disconnect from Google Drive? Your local entries remain preserved on this device.")) {
+        try {
+          await logout();
+          setDriveConnected(false);
+        } catch (err) {
+          console.error("Could not disconnect:", err);
+        }
+      }
+      return;
+    }
+
     try {
       const res = await googleSignIn();
       if (res?.accessToken) {

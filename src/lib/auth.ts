@@ -15,6 +15,20 @@ export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
   onAuthFailure?: () => void
 ) => {
+  const storedToken = localStorage.getItem('opnjrnl_google_access_token');
+  const savedAtStr = localStorage.getItem('opnjrnl_google_token_saved_at');
+  if (storedToken && savedAtStr) {
+    const savedAt = parseInt(savedAtStr, 10);
+    // Is the token less than 50 minutes old? (Google OAuth tokens expire in 60 minutes)
+    if (Date.now() - savedAt < 50 * 60 * 1000) {
+      cachedAccessToken = storedToken;
+    } else {
+      cachedAccessToken = null;
+      localStorage.removeItem('opnjrnl_google_access_token');
+      localStorage.removeItem('opnjrnl_google_token_saved_at');
+    }
+  }
+
   return onAuthStateChanged(auth, async (user: User | null) => {
     if (user) {
       if (cachedAccessToken) {
@@ -25,6 +39,8 @@ export const initAuth = (
       }
     } else {
       cachedAccessToken = null;
+      localStorage.removeItem('opnjrnl_google_access_token');
+      localStorage.removeItem('opnjrnl_google_token_saved_at');
       if (onAuthFailure) onAuthFailure();
     }
   });
@@ -40,6 +56,8 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     }
 
     cachedAccessToken = credential.accessToken;
+    localStorage.setItem('opnjrnl_google_access_token', cachedAccessToken);
+    localStorage.setItem('opnjrnl_google_token_saved_at', Date.now().toString());
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
     console.error('Sign in error:', error);
@@ -50,10 +68,20 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
 };
 
 export const getAccessToken = async (): Promise<string | null> => {
-  return cachedAccessToken;
+  const storedToken = localStorage.getItem('opnjrnl_google_access_token');
+  const savedAtStr = localStorage.getItem('opnjrnl_google_token_saved_at');
+  if (storedToken && savedAtStr) {
+    const savedAt = parseInt(savedAtStr, 10);
+    if (Date.now() - savedAt < 50 * 60 * 1000) {
+      return storedToken;
+    }
+  }
+  return null;
 };
 
 export const logout = async () => {
   await auth.signOut();
   cachedAccessToken = null;
+  localStorage.removeItem('opnjrnl_google_access_token');
+  localStorage.removeItem('opnjrnl_google_token_saved_at');
 };
