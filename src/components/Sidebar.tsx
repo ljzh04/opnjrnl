@@ -346,7 +346,7 @@ export default function Sidebar({
                   <div className="border-t pt-3 text-[10px] leading-relaxed opacity-60 flex flex-col gap-1.5" style={{ borderColor: theme.surfaceBorder }}>
                     <p className="font-bold uppercase tracking-wider">Storage & Drive Access Disclosure:</p>
                     <p>
-                      opnjrnl prioritizes your privacy first. We request access with the restricted <strong>drive.file</strong> API scope to create a custom folder (<code className="font-mono text-[9px] font-semibold">opnjrnl_backup/</code>) containing a single backup file (<code className="font-mono text-[9px] font-semibold">opnjrnl_backup.json</code>) in your private Drive directory so you can sync notes securely. We cannot access or view other folders or assets. No third-party servers see or store your diary files. Open the document below for complete information.
+                      opnjrnl prioritizes your privacy first. We request access with the unrestricted <strong>drive.appdata</strong> API scope to manage a private backup file (<code className="font-mono text-[9px] font-semibold">opnjrnl_backup.json</code>) inside a secure, hidden application data folder. The app cannot access, read, or modify any other files or folders in your Drive. No third-party servers see or store your journal files. Open the document below for complete information.
                     </p>
                     <a href="privacy.html" target="_blank" rel="noopener noreferrer" className="underline font-bold text-blue-600 dark:text-blue-400 hover:opacity-100 block mt-0.5">
                       Open Privacy Policy &rarr;

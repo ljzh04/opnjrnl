@@ -6,7 +6,7 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 
 const provider = new GoogleAuthProvider();
-provider.addScope('https://www.googleapis.com/auth/drive');
+provider.addScope('https://www.googleapis.com/auth/drive.appdata');
 
 let isSigningIn = false;
 let cachedAccessToken: string | null = null;

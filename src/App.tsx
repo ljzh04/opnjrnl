@@ -174,36 +174,10 @@ export default function App() {
       const dataStr = JSON.stringify(dataToSync);
       const mimeType = 'application/json';
 
-      // Helper to find or create the 'opnjrnl_backup' directory
-      const getOrCreateFolder = async (): Promise<string> => {
-        const folderQ = encodeURIComponent("name = 'opnjrnl_backup' and mimeType = 'application/vnd.google-apps.folder' and trashed = false");
-        const folderRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=${folderQ}&fields=files(id)`, {
-          headers: { Authorization: `Bearer ${accessToken}` }
-        });
-        const folderData = await folderRes.json();
-        if (folderData.files && folderData.files.length > 0) {
-          return folderData.files[0].id;
-        }
-
-        const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            name: 'opnjrnl_backup',
-            mimeType: 'application/vnd.google-apps.folder'
-          })
-        });
-        const createdFolder = await createRes.json();
-        return createdFolder.id;
-      };
-
-      // Helper to find the backup file inside the custom directory
-      const findFileInFolder = async (folderId: string): Promise<string | null> => {
-        const fileQ = encodeURIComponent(`name = 'opnjrnl_backup.json' and '${folderId}' in parents and trashed = false`);
-        const fileRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=${fileQ}&fields=files(id)`, {
+      // Helper to find the backup file inside the isolated appDataFolder space
+      const findFileInAppData = async (): Promise<string | null> => {
+        const fileQ = encodeURIComponent("name = 'opnjrnl_backup.json' and trashed = false");
+        const fileRes = await fetch(`https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${fileQ}&fields=files(id)`, {
           headers: { Authorization: `Bearer ${accessToken}` }
         });
         const fileData = await fileRes.json();
@@ -235,9 +209,8 @@ export default function App() {
         }
       }
 
-      // 2. Resolve directory and active backup file
-      const folderId = await getOrCreateFolder();
-      const activeFileId = fileId || await findFileInFolder(folderId);
+      // 2. Resolve active backup file ID from application isolated space
+      const activeFileId = fileId || await findFileInAppData();
 
       if (activeFileId) {
         if (forceFetchFirst) {
@@ -268,7 +241,7 @@ export default function App() {
                 // Write merged results back to current browser state
                 setEntries(merged);
                 
-                // Update remote backup file in the custom folder with merged data
+                // Update remote backup file inside the hidden appDataFolder with merged data
                 await fetch(`https://www.googleapis.com/upload/drive/v3/files/${activeFileId}?uploadType=media`, {
                   method: 'PATCH',
                   headers: {
@@ -299,11 +272,11 @@ export default function App() {
         await set(DRIVE_FILE_ID_KEY, activeFileId);
 
       } else {
-        // Create new backup file inside children of the custom folder
+        // Create new backup file inside the isolated appDataFolder parents list
         const metadata = {
           name: 'opnjrnl_backup.json',
           mimeType,
-          parents: [folderId]
+          parents: ['appDataFolder']
         };
 
         const form = new FormData();
@@ -317,7 +290,6 @@ export default function App() {
           },
           body: form
         });
-
         const createdFile = await res.json();
         if (createdFile.id) {
           await set(DRIVE_FILE_ID_KEY, createdFile.id);

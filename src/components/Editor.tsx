@@ -310,18 +310,18 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
               </p>
               
               <p>
-                When you choose to authenticate with Google, our application requests access strictly through the official, restricted <strong><code className="px-1.5 py-0.5 rounded font-mono text-[10px] bg-black/5 dark:bg-white/10 text-current font-bold">https://www.googleapis.com/auth/drive.file</code></strong> scope.
+                When you choose to authenticate with Google, our application requests access strictly through the official, unrestricted <strong><code className="px-1.5 py-0.5 rounded font-mono text-[10px] bg-black/5 dark:bg-white/10 text-current font-bold">https://www.googleapis.com/auth/drive.appdata</code></strong> scope.
               </p>
               
               <ul className="list-disc pl-5 flex flex-col gap-1.5 font-sans mt-1">
                 <li>
-                  <strong>Scope Limit:</strong> The app CANNOT view, read, modify, or delete any other folders, slides, photos, or files in your Google Drive.
+                  <strong>Scope Limit:</strong> The app CANNOT view, read, modify, or delete any of your files, folders, documents, or photos in your Google Drive.
                 </li>
                 <li>
-                  <strong>Exclusive Purpose:</strong> Access is limited purely to managing a private backup inside the custom folder <code className="font-mono text-[10px] font-bold">opnjrnl_backup/</code> (file name: <code className="font-mono text-[10px] font-bold">opnjrnl_backup.json</code>) inside your secure workspace.
+                  <strong>Exclusive Purpose:</strong> Access is limited strictly to creating and updating its own hidden configuration and backup data (<code className="font-mono text-[10px] font-bold">opnjrnl_backup.json</code>) inside an application-isolated directory. This folder is managed solely by Google Drive for this app and is completely invisible to other applications and search indexers.
                 </li>
                 <li>
-                  <strong>Self-Custody Ownership:</strong> Your journal data is transferred securely between your browser and your private Google Drive directory over HTTPS. It is never processed, routed, analyzed, or gathered by us or any secondary servers. You have absolute custody of your text archives.
+                  <strong>Self-Custody Ownership:</strong> Your journal data is transferred securely and directly between your browser database and your personal Google Drive storage space over HTTPS. It is never transmitted, processed, or logged by opnjrnl or any other third-party servers.
                 </li>
               </ul>
             </div>
