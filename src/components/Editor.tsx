@@ -83,14 +83,6 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
     }
   }, [title]);
 
-  // Auto-resize content textarea
-  useEffect(() => {
-    if (contentRef.current) {
-      contentRef.current.style.height = 'auto';
-      contentRef.current.style.height = contentRef.current.scrollHeight + 'px';
-    }
-  }, [content]);
-
   const toggleFavorite = () => {
     if (!entry) return;
     const nextVal = !entry.isFavorite;
@@ -247,15 +239,15 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
         )}
       </AnimatePresence>
 
-      {/* Editor Scrolling Canvas */}
+      {/* Editor Canvas */}
       <div 
-        className="flex-1 overflow-y-auto pb-[20vh] overscroll-y-contain touch-pan-y scroll-smooth scrollbar-thin"
-        style={{ WebkitOverflowScrolling: 'touch' }}
+        className="flex-1 flex flex-col overflow-hidden pb-4 md:pb-6"
       >
-        <div className="w-full max-w-2xl mx-auto px-6 py-6 md:py-10">
+        <div className="w-full max-w-2xl mx-auto px-6 pt-6 md:pt-10 flex-1 flex flex-col overflow-hidden">
           
-          {/* Action Bar (Replaces Top Tool Shelf) */}
-          <div className="flex justify-end items-center mb-6 min-h-[36px]">
+          <div className="shrink-0 flex flex-col">
+            {/* Action Bar (Replaces Top Tool Shelf) */}
+            <div className="flex justify-end items-center mb-6 min-h-[36px]">
             {showDeleteConfirm ? (
               <motion.div 
                 initial={{ opacity: 0, scale: 0.95 }}
@@ -322,7 +314,7 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Untitled page"
-            className="text-3xl md:text-4xl font-serif text-zinc-900 border-none outline-none bg-transparent resize-none focus:ring-0 leading-snug block w-full py-0 font-semibold placeholder:text-zinc-300 dark:placeholder:text-zinc-600 mb-4 md:mb-5"
+            className="text-3xl md:text-4xl font-serif text-zinc-900 border-none outline-none bg-transparent resize-none focus:ring-0 leading-snug block w-full py-0 font-semibold placeholder:text-zinc-300 dark:placeholder:text-zinc-600 mb-4 md:mb-5 overflow-hidden"
             style={{ color: theme.textPrimary }}
             rows={1}
           />
@@ -431,36 +423,37 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
                 )}
               </div>
               
-              {/* Suggestions drawn entirely from user-made tags in other entries! */}
-              {showTagAdder && userTags.length > 0 && (
-                <div 
-                  className="absolute z-10 top-full left-0 mt-2 flex max-w-[200px] flex-wrap gap-1 p-2 rounded border shadow-xl text-[10px]" 
-                  style={{ 
-                    borderColor: theme.surfaceBorder,
-                    backgroundColor: theme.surface,
-                    color: theme.textPrimary
-                  }}
-                >
-                  <span className="opacity-40 w-full mb-0.5 lowercase font-mono">Suggestions:</span>
-                  {userTags.map((uTag) => (
-                    <button
-                      key={uTag}
-                      onClick={() => handleAddTag(uTag)}
-                      className="px-2 py-1 rounded cursor-pointer opacity-80 active:opacity-100 active:scale-95 transition-all"
-                      style={{ 
-                        backgroundColor: theme.accentLight,
-                        color: theme.textSecondary 
-                      }}
-                    >
-                      +{uTag}
-                    </button>
-                  ))}
-                </div>
-              )}
+                {/* Suggestions drawn entirely from user-made tags in other entries! */}
+                {showTagAdder && userTags.length > 0 && (
+                  <div 
+                    className="absolute z-10 top-full left-0 mt-2 flex max-w-[200px] flex-wrap gap-1 p-2 rounded border shadow-xl text-[10px]" 
+                    style={{ 
+                      borderColor: theme.surfaceBorder,
+                      backgroundColor: theme.surface,
+                      color: theme.textPrimary
+                    }}
+                  >
+                    <span className="opacity-40 w-full mb-0.5 lowercase font-mono">Suggestions:</span>
+                    {userTags.map((uTag) => (
+                      <button
+                        key={uTag}
+                        onClick={() => handleAddTag(uTag)}
+                        className="px-2 py-1 rounded cursor-pointer opacity-80 active:opacity-100 active:scale-95 transition-all"
+                        style={{ 
+                          backgroundColor: theme.accentLight,
+                          color: theme.textSecondary 
+                        }}
+                      >
+                        +{uTag}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
 
-          <hr className="mb-8 border-t" style={{ borderColor: theme.surfaceBorder }} />
+            <hr className="mb-4 border-t" style={{ borderColor: theme.surfaceBorder }} />
+          </div>
 
           {/* Composing Textarea Area */}
           <textarea
@@ -468,7 +461,7 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
             value={content}
             onChange={(e) => setContent(e.target.value)}
             placeholder="Begin writing..."
-            className="w-full text-base md:text-lg font-serif leading-[1.8] border-none outline-none bg-transparent resize-none focus:ring-0 py-0 min-h-[450px]"
+            className="w-full flex-1 text-base md:text-lg font-serif leading-[1.8] border-none outline-none bg-transparent resize-none focus:ring-0 py-2 min-h-0 overflow-y-auto scrollbar-thin md:scrollbar-thin"
             style={{ color: theme.textPrimary }}
           />
         </div>

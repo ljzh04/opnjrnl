@@ -17,7 +17,8 @@ import {
   CloudRain,
   Sun,
   ChevronLeft,
-  Cloud
+  Cloud,
+  RefreshCw
 } from 'lucide-react';
 import { useState, ChangeEvent, ReactNode } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -56,6 +57,8 @@ interface SidebarProps {
   notificationsEnabled?: boolean;
   notificationTime?: string;
   onUpdateNotifications?: (enabled: boolean, time: string) => void;
+  showSettings?: boolean;
+  onToggleSettings?: (show: boolean) => void;
 }
 
 export default function Sidebar({
@@ -83,10 +86,81 @@ export default function Sidebar({
   onUpdateSystemLock,
   notificationsEnabled,
   notificationTime,
-  onUpdateNotifications
+  onUpdateNotifications,
+  showSettings,
+  onToggleSettings
 }: SidebarProps) {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  const [showSettings, setShowSettings] = useState(false);
+  const [localShowSettings, setLocalShowSettings] = useState(false);
+  
+  const isSettingsActive = showSettings !== undefined ? showSettings : localShowSettings;
+  const setSettingsActive = onToggleSettings !== undefined ? onToggleSettings : setLocalShowSettings;
+
+  // Updates State for Github
+  const CURRENT_COMMIT_HASH = "8a2f4da";
+  const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'up-to-date' | 'available' | 'patching' | 'error'>('idle');
+  const [latestCommit, setLatestCommit] = useState<{ sha: string; message: string; date: string } | null>(null);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const handleCheckUpdates = async () => {
+    setUpdateStatus('checking');
+    setErrorMessage('');
+    try {
+      const response = await fetch('https://api.github.com/repos/ljzh04/opnjrnl/commits/main');
+      if (!response.ok) {
+        throw new Error('Failed to fetch repository details');
+      }
+      const data = await response.json();
+      const sha = data.sha || '';
+      const message = data.commit?.message || 'No description';
+      const date = data.commit?.committer?.date || '';
+      
+      const shortSha = sha.substring(0, 7) || 'latest';
+      setLatestCommit({ sha: shortSha, message, date });
+      
+      const installedSha = localStorage.getItem('patched-commit-sha') || CURRENT_COMMIT_HASH;
+      
+      if (shortSha === installedSha || sha === installedSha) {
+        setUpdateStatus('up-to-date');
+      } else {
+        setUpdateStatus('available');
+      }
+    } catch (err: any) {
+      console.error(err);
+      setUpdateStatus('error');
+      setErrorMessage(err.message || 'Check failed. Please verify internet connection.');
+    }
+  };
+
+  const handleAutoPatch = async () => {
+    if (!latestCommit) return;
+    setUpdateStatus('patching');
+    
+    try {
+      if ('caches' in window) {
+        const cacheKeys = await window.caches.keys();
+        await Promise.all(cacheKeys.map(key => window.caches.delete(key)));
+      }
+      
+      if ('serviceWorker' in navigator) {
+        const registration = await navigator.serviceWorker.getRegistration();
+        if (registration) {
+          await registration.update();
+        }
+      }
+      
+      localStorage.setItem('patched-commit-sha', latestCommit.sha);
+      
+      setTimeout(() => {
+        window.location.reload();
+      }, 1500);
+    } catch (err: any) {
+      console.error(err);
+      setUpdateStatus('error');
+      setErrorMessage("Patch failed: " + (err.message || "Unknown error"));
+    }
+  };
+
   const [showPasswordSetup, setShowPasswordSetup] = useState(false);
   const [showPasswordRemove, setShowPasswordRemove] = useState(false);
   const [showDeviceLockRemove, setShowDeviceLockRemove] = useState(false);
@@ -137,12 +211,12 @@ export default function Sidebar({
               Chapters
             </h1>
             <p className="text-[10px] uppercase tracking-widest opacity-40 font-mono mt-0.5">
-              Open Journal
+              opnjrnl
             </p>
           </div>
 
           <button
-            onClick={() => setShowSettings(!showSettings)}
+            onClick={() => setSettingsActive(!isSettingsActive)}
             className="flex items-center justify-center p-2 rounded-full opacity-70 active:opacity-100 transition-all bg-black/5 dark:bg-white/5"
             title="Settings"
           >
@@ -191,7 +265,7 @@ export default function Sidebar({
 
       {/* Settings Overlay Slide-in */}
       <AnimatePresence>
-        {showSettings && (
+        {isSettingsActive && (
           <motion.div
             initial={{ x: '-100%' }}
             animate={{ x: 0 }}
@@ -207,7 +281,7 @@ export default function Sidebar({
             {/* Header */}
             <div className="flex items-center px-6 py-6 border-b shrink-0" style={{ borderColor: theme.surfaceBorder }}>
               <button 
-                onClick={() => setShowSettings(false)}
+                onClick={() => setSettingsActive(false)}
                 className="w-8 h-8 flex items-center justify-center -ml-2 rounded-full active:bg-black/5 dark:active:bg-white/5 transition-colors"
               >
                 <ChevronLeft className="w-5 h-5 opacity-60" />
@@ -453,6 +527,76 @@ export default function Sidebar({
                       className="hidden"
                     />
                   </label>
+                </div>
+              </div>
+
+              {/* App Version & In-App Updates */}
+              <div className="flex flex-col gap-3">
+                <span className="text-[10px] font-bold tracking-widest uppercase opacity-40">System Updates</span>
+                <div 
+                  className="rounded-xl border p-4 flex flex-col gap-4 text-xs"
+                  style={{ borderColor: theme.surfaceBorder, backgroundColor: theme.surface }}
+                >
+                  <div className="flex justify-between items-center">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="font-semibold tracking-wide">Version Status</span>
+                      <span className="text-[10px] opacity-50 font-mono uppercase">
+                        Current: {localStorage.getItem('patched-commit-sha') || CURRENT_COMMIT_HASH}
+                      </span>
+                    </div>
+                    {updateStatus === 'checking' ? (
+                      <button 
+                        disabled
+                        className="px-3 py-1 bg-black/5 dark:bg-white/5 rounded-lg opacity-50 flex items-center gap-1.5 animate-pulse"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Checking...</span>
+                      </button>
+                    ) : updateStatus === 'patching' ? (
+                      <button 
+                        disabled
+                        className="px-3 py-1 bg-amber-500/10 text-amber-500 rounded-lg flex items-center gap-1.5"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Patching...</span>
+                      </button>
+                    ) : (
+                      <button
+                        onClick={handleCheckUpdates}
+                        className="px-3 py-1 bg-black/5 dark:bg-white/5 active:bg-black/10 dark:active:bg-white/10 rounded-lg opacity-80 active:opacity-100 transition-colors flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        <span>Check Updates</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {updateStatus === 'up-to-date' && (
+                    <div className="p-3 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium text-[11px] leading-snug">
+                      Your journal app is fully updated with the latest patches!
+                    </div>
+                  )}
+
+                  {updateStatus === 'available' && latestCommit && (
+                    <div className="p-3.5 rounded-lg bg-amber-500/10 border border-amber-500/25 flex flex-col gap-2.5 text-[11px] leading-relaxed">
+                      <div>
+                        <p className="font-semibold text-amber-600 dark:text-amber-400 mb-1">New Patch Available ({latestCommit.sha})</p>
+                        <p className="opacity-75 italic">"{latestCommit.message}"</p>
+                      </div>
+                      <button
+                        onClick={handleAutoPatch}
+                        className="w-full py-2 bg-amber-500 active:bg-amber-600 active:scale-95 text-white rounded-lg font-bold text-center tracking-wider transition-all shadow-sm cursor-pointer"
+                      >
+                        Auto-Patch & Update Now
+                      </button>
+                    </div>
+                  )}
+
+                  {updateStatus === 'error' && (
+                    <div className="p-3 rounded-lg bg-rose-500/10 text-rose-500 font-medium text-[11px] leading-snug animate-fade-in">
+                      {errorMessage || "Unable to retrieve update details. Please try again later."}
+                    </div>
+                  )}
                 </div>
               </div>
               

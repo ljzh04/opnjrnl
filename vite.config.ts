@@ -14,8 +14,8 @@ export default defineConfig(() => {
         registerType: 'autoUpdate',
         includeAssets: ['icon.svg'],
         manifest: {
-          name: 'Minimal Journal',
-          short_name: 'Journal',
+          name: 'opnjrnl',
+          short_name: 'opnjrnl',
           description: 'A minimal, offline client-side journal application.',
           theme_color: '#ffffff',
           background_color: '#ffffff',

@@ -1,0 +1,73 @@
+name: Package PWA and Publish to Releases
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build PWA Native Packages and Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build Web Application
+        run: npm run build
+
+      - name: Generate Native App Packages via PWABuilder
+        id: pwabuilder
+        uses: pwa-builder/pwa-action@v1
+        with:
+          pwa-url: "https://ljzh04.github.io/opnjrnl/"
+          android-packager: true
+          windows-packager: true
+          ios-packager: false
+
+      - name: Zip Built Native Packages
+        run: |
+          # Zip Android source & build packages if they exist
+          if [ -d "${{ steps.pwabuilder.outputs.android-path }}" ]; then
+            echo "Packaging Android app from ${{ steps.pwabuilder.outputs.android-path }}"
+            cd "${{ steps.pwabuilder.outputs.android-path }}"
+            zip -r "$GITHUB_WORKSPACE/opnjrnl-android.zip" .
+            cd "$GITHUB_WORKSPACE"
+          else
+            echo "Warning: Android build path not found"
+          fi
+
+          # Zip Windows source & build packages if they exist
+          if [ -d "${{ steps.pwabuilder.outputs.windows-path }}" ]; then
+            echo "Packaging Windows app from ${{ steps.pwabuilder.outputs.windows-path }}"
+            cd "${{ steps.pwabuilder.outputs.windows-path }}"
+            zip -r "$GITHUB_WORKSPACE/opnjrnl-windows.zip" .
+            cd "$GITHUB_WORKSPACE"
+          else
+            echo "Warning: Windows build path not found"
+          fi
+
+      - name: Create Release & Upload Assets
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            opnjrnl-android.zip
+            opnjrnl-windows.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

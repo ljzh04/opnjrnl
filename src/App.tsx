@@ -40,6 +40,20 @@ export default function App() {
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const [deletedEntryState, setDeletedEntryState] = useState<{ entry: JournalEntry } | null>(null);
 
+  // Navigation & History State (System Back Interceptor)
+  const [showSettings, setShowSettings] = useState(false);
+  const [backToastActive, setBackToastActive] = useState(false);
+  const backToastTimeoutRef = useRef<any>(null);
+
+  const activeEntryIdRef = useRef<string | null>(null);
+  activeEntryIdRef.current = activeEntryId;
+
+  const showSettingsRef = useRef<boolean>(false);
+  showSettingsRef.current = showSettings;
+
+  const backToastActiveRef = useRef<boolean>(false);
+  backToastActiveRef.current = backToastActive;
+
   // Cloud Sync properties
   const [driveConnected, setDriveConnected] = useState(false);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -49,6 +63,43 @@ export default function App() {
     if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
     setDeletedEntryState(null);
   };
+
+  // System Back Button Interceptor utilizing HTML5 History API
+  useEffect(() => {
+    window.history.replaceState({ type: 'exit-guard' }, '');
+    window.history.pushState({ type: 'home' }, '');
+
+    const handlePopState = (e: PopStateEvent) => {
+      const state = e.state;
+      if (state && state.type === 'exit-guard') {
+        if (showSettingsRef.current) {
+          setShowSettings(false);
+          window.history.pushState({ type: 'home' }, '');
+        } else if (activeEntryIdRef.current) {
+          setActiveEntryId(null);
+          window.history.pushState({ type: 'home' }, '');
+        } else {
+          if (backToastActiveRef.current) {
+            window.history.go(-1);
+          } else {
+            setBackToastActive(true);
+            window.history.pushState({ type: 'home' }, '');
+            
+            if (backToastTimeoutRef.current) clearTimeout(backToastTimeoutRef.current);
+            backToastTimeoutRef.current = setTimeout(() => {
+              setBackToastActive(false);
+            }, 2000);
+          }
+        }
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      if (backToastTimeoutRef.current) clearTimeout(backToastTimeoutRef.current);
+    };
+  }, []);
 
   // Initial persistent state restoration
   useEffect(() => {
@@ -236,7 +287,6 @@ export default function App() {
     }
     if (deletedEntryState) {
       setEntries(current => [deletedEntryState.entry, ...current].sort((a, b) => b.createdAt - a.createdAt));
-      setActiveEntryId(deletedEntryState.entry.id);
       clearUndoState();
     }
   };
@@ -430,6 +480,8 @@ export default function App() {
         <Sidebar
           entries={entries}
           activeEntryId={activeEntryId}
+          showSettings={showSettings}
+          onToggleSettings={setShowSettings}
           onSelectEntry={(id) => {
             clearUndoState();
             setActiveEntryId(id);
@@ -532,6 +584,20 @@ export default function App() {
           >
             Undo
           </button>
+        </div>
+      )}
+
+      {/* Tap Back Again to Exit Toast */}
+      {backToastActive && (
+        <div 
+          className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 flex items-center justify-between gap-6 px-5 py-3.5 rounded-full shadow-lg border text-sm font-sans"
+          style={{ 
+            backgroundColor: currentTheme.surface, 
+            borderColor: currentTheme.surfaceBorder,
+            color: currentTheme.textPrimary
+          }}
+        >
+          <span className="font-medium tracking-wide">Tap back again to exit</span>
         </div>
       )}
     </div>
