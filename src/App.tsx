@@ -156,8 +156,8 @@ export default function App() {
       const res = await googleSignIn();
       if (res?.accessToken) {
         setDriveConnected(true);
-        // Trigger a sync immediately
-        await syncToDrive(entries, res.accessToken);
+        // Trigger a sync immediately and force conflict resolution/merging with any remote backup
+        await syncToDrive(entries, res.accessToken, true);
       }
     } catch (err) {
       console.error("Could not sign in:", err);
@@ -165,18 +165,130 @@ export default function App() {
     }
   };
 
-  const syncToDrive = async (dataToSync: JournalEntry[], token?: string | null) => {
+  const syncToDrive = async (dataToSync: JournalEntry[], token?: string | null, forceFetchFirst = false) => {
     const accessToken = token || await getAccessToken();
     if (!accessToken) return;
 
     try {
-      const fileId = await get<string>(DRIVE_FILE_ID_KEY);
+      let fileId = await get<string>(DRIVE_FILE_ID_KEY);
       const dataStr = JSON.stringify(dataToSync);
       const mimeType = 'application/json';
 
-      if (fileId) {
-        // Update existing file
-        await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+      // Helper to find or create the 'opnjrnl_backup' directory
+      const getOrCreateFolder = async (): Promise<string> => {
+        const folderQ = encodeURIComponent("name = 'opnjrnl_backup' and mimeType = 'application/vnd.google-apps.folder' and trashed = false");
+        const folderRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=${folderQ}&fields=files(id)`, {
+          headers: { Authorization: `Bearer ${accessToken}` }
+        });
+        const folderData = await folderRes.json();
+        if (folderData.files && folderData.files.length > 0) {
+          return folderData.files[0].id;
+        }
+
+        const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            name: 'opnjrnl_backup',
+            mimeType: 'application/vnd.google-apps.folder'
+          })
+        });
+        const createdFolder = await createRes.json();
+        return createdFolder.id;
+      };
+
+      // Helper to find the backup file inside the custom directory
+      const findFileInFolder = async (folderId: string): Promise<string | null> => {
+        const fileQ = encodeURIComponent(`name = 'opnjrnl_backup.json' and '${folderId}' in parents and trashed = false`);
+        const fileRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=${fileQ}&fields=files(id)`, {
+          headers: { Authorization: `Bearer ${accessToken}` }
+        });
+        const fileData = await fileRes.json();
+        if (fileData.files && fileData.files.length > 0) {
+          return fileData.files[0].id;
+        }
+        return null;
+      };
+
+      // 1. Direct short-circuit if we have cached ID and are not performing full merges
+      if (fileId && !forceFetchFirst) {
+        try {
+          const updateRes = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+            method: 'PATCH',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': mimeType
+            },
+            body: dataStr
+          });
+          if (updateRes.status === 200 || updateRes.status === 204) {
+            return; // Success
+          }
+          if (updateRes.status === 404) {
+            fileId = null; // Stale ID, fall through to resolve
+          }
+        } catch (e) {
+          console.warn("Direct patch update failed, running full resolution pattern", e);
+        }
+      }
+
+      // 2. Resolve directory and active backup file
+      const folderId = await getOrCreateFolder();
+      const activeFileId = fileId || await findFileInFolder(folderId);
+
+      if (activeFileId) {
+        if (forceFetchFirst) {
+          try {
+            const downloadRes = await fetch(`https://www.googleapis.com/drive/v3/files/${activeFileId}?alt=media`, {
+              headers: { Authorization: `Bearer ${accessToken}` }
+            });
+            if (downloadRes.ok) {
+              const cloudEntries = await downloadRes.json();
+              if (Array.isArray(cloudEntries)) {
+                // Perform two-way conflict-free merge
+                const map = new Map<string, JournalEntry>();
+                dataToSync.forEach(e => map.set(e.id, e));
+                cloudEntries.forEach((e: any) => {
+                  const existing = map.get(e.id);
+                  if (!existing) {
+                    map.set(e.id, e);
+                  } else {
+                    const existingTime = existing.updatedAt || existing.createdAt || 0;
+                    const cloudTime = e.updatedAt || e.createdAt || 0;
+                    if (cloudTime > existingTime) {
+                      map.set(e.id, e);
+                    }
+                  }
+                });
+                const merged = Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);
+                
+                // Write merged results back to current browser state
+                setEntries(merged);
+                
+                // Update remote backup file in the custom folder with merged data
+                await fetch(`https://www.googleapis.com/upload/drive/v3/files/${activeFileId}?uploadType=media`, {
+                  method: 'PATCH',
+                  headers: {
+                    Authorization: `Bearer ${accessToken}`,
+                    'Content-Type': mimeType
+                  },
+                  body: JSON.stringify(merged)
+                });
+                
+                await set(DRIVE_FILE_ID_KEY, activeFileId);
+                return;
+              }
+            }
+          } catch (err) {
+            console.error("Could not fetch or merge pre-existing backup indices on Drive:", err);
+          }
+        }
+
+        // Standard patch update
+        await fetch(`https://www.googleapis.com/upload/drive/v3/files/${activeFileId}?uploadType=media`, {
           method: 'PATCH',
           headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -184,11 +296,14 @@ export default function App() {
           },
           body: dataStr
         });
+        await set(DRIVE_FILE_ID_KEY, activeFileId);
+
       } else {
-        // Create new file
+        // Create new backup file inside children of the custom folder
         const metadata = {
-          name: 'minimal_journal_backup.json',
+          name: 'opnjrnl_backup.json',
           mimeType,
+          parents: [folderId]
         };
 
         const form = new FormData();
@@ -208,6 +323,7 @@ export default function App() {
           await set(DRIVE_FILE_ID_KEY, createdFile.id);
         }
       }
+
     } catch (err) {
       console.error("Drive sync error:", err);
     }

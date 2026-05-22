@@ -15,7 +15,10 @@ import {
   Meh,
   Frown,
   CloudRain,
-  Sun
+  Sun,
+  Shield,
+  Lock,
+  Info
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -197,22 +200,163 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
   if (!entry) {
     return (
       <div 
-        className="flex-1 hidden md:flex flex-col items-center justify-center p-12 text-center select-none"
+        className="flex-1 hidden md:flex flex-col h-full overflow-y-auto"
         style={{ backgroundColor: theme.surface }}
       >
-        <div className="max-w-xs flex flex-col items-center">
-          <div 
-            className="w-16 h-16 rounded-full flex items-center justify-center mb-6 border"
-            style={{ borderColor: theme.surfaceBorder, backgroundColor: theme.background }}
-          >
-            <BookOpen className="w-6 h-6 opacity-40 text-current" />
+        <div className="w-full max-w-2xl mx-auto px-8 py-12 flex-1 flex flex-col justify-between">
+          
+          {/* Main Hero & Identifiers */}
+          <div className="flex flex-col mb-10">
+            <div className="flex items-center gap-3.5 mb-5 select-none">
+              <div 
+                className="w-11 h-11 rounded-xl flex items-center justify-center border shadow-sm"
+                style={{ borderColor: theme.surfaceBorder, backgroundColor: theme.background }}
+              >
+                <BookOpen className="w-5 h-5 text-current opacity-75" />
+              </div>
+              <div>
+                <h1 className="font-serif text-2xl font-bold tracking-tight" style={{ color: theme.textPrimary }}>
+                  opnjrnl
+                </h1>
+                <p className="text-[9px] uppercase tracking-[0.2em] opacity-50 font-mono">
+                  Autonomous Personal Ledger
+                </p>
+              </div>
+            </div>
+
+            <h2 className="text-xl md:text-2xl font-serif font-medium tracking-tight mb-4 leading-snug" style={{ color: theme.textPrimary }}>
+              Your private space to capture life, moments, and daily reflections.
+            </h2>
+            
+            <p className="text-sm font-sans opacity-75 leading-relaxed" style={{ color: theme.textSecondary }}>
+              opnjrnl is an elegant, open-source personal writing companion built on a foundation of absolute privacy and local-first architecture. It works completely offline on all your devices with no setup, accounts, or trackers required.
+            </p>
           </div>
-          <h2 className="font-serif text-xl font-medium tracking-tight mb-2" style={{ color: theme.textPrimary }}>
-            Untold Journeys
-          </h2>
-          <p className="text-xs font-sans opacity-60 leading-relaxed" style={{ color: theme.textSecondary }}>
-            Select an archive page from the timeline, or begin typing a new chapter. Everything is saved automatically on your local storage.
-          </p>
+
+          {/* Key Functionality & Features Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 mb-10">
+            <div 
+              className="p-5 rounded-xl border flex flex-col gap-2 shadow-sm"
+              style={{ borderColor: theme.surfaceBorder, backgroundColor: theme.background }}
+            >
+              <div className="flex items-center gap-2 mb-1" style={{ color: theme.textPrimary }}>
+                <Shield className="w-4 h-4 opacity-80" />
+                <h3 className="font-sans font-semibold text-xs tracking-wide uppercase">100% Privacy & Local-First</h3>
+              </div>
+              <p className="text-xs leading-relaxed opacity-70" style={{ color: theme.textSecondary }}>
+                All written chapters, mood data, tags, and favorites are stored directly inside your browser's local sandbox memory (IndexedDB). No analytics, trackers, or centralized servers ever receive or parse your memories.
+              </p>
+            </div>
+
+            <div 
+              className="p-5 rounded-xl border flex flex-col gap-2 shadow-sm"
+              style={{ borderColor: theme.surfaceBorder, backgroundColor: theme.background }}
+            >
+              <div className="flex items-center gap-2 mb-1" style={{ color: theme.textPrimary }}>
+                <Lock className="w-4 h-4 opacity-80" />
+                <h3 className="font-sans font-semibold text-xs tracking-wide uppercase">Local Screen Lock & Passwords</h3>
+              </div>
+              <p className="text-xs leading-relaxed opacity-70" style={{ color: theme.textSecondary }}>
+                Safeguard the contents of your app against physical intruders using state-of-the-art WebAuthn biometric security (Face ID / Touch ID) or setup a traditional custom encrypted app passcode in your settings.
+              </p>
+            </div>
+
+            <div 
+              className="p-5 rounded-xl border flex flex-col gap-2 shadow-sm"
+              style={{ borderColor: theme.surfaceBorder, backgroundColor: theme.background }}
+            >
+              <div className="flex items-center gap-2 mb-1" style={{ color: theme.textPrimary }}>
+                <Smile className="w-4 h-4 opacity-80" />
+                <h3 className="font-sans font-semibold text-xs tracking-wide uppercase">Intuitive Organization</h3>
+              </div>
+              <p className="text-xs leading-relaxed opacity-70" style={{ color: theme.textSecondary }}>
+                Easily index, filter, and track patterns over time with natural daily mood tags, smart inline keyword indexing, favorite markers, automatic tag suggestions, and lightning-fast fuzzy global search.
+              </p>
+            </div>
+
+            <div 
+              className="p-5 rounded-xl border flex flex-col gap-2 shadow-sm"
+              style={{ borderColor: theme.surfaceBorder, backgroundColor: theme.background }}
+            >
+              <div className="flex items-center gap-2 mb-1" style={{ color: theme.textPrimary }}>
+                <Sparkles className="w-4 h-4 opacity-80" />
+                <h3 className="font-sans font-semibold text-xs tracking-wide uppercase">Visual Ease Themes</h3>
+              </div>
+              <p className="text-xs leading-relaxed opacity-70" style={{ color: theme.textSecondary }}>
+                Tailor your writing canvas to your immediate reading conditions. Effortlessly cycle between beautiful distraction-free styles like Warm Paper, Creamy Vintage, or Charcoal Midnight interfaces.
+              </p>
+            </div>
+          </div>
+
+          {/* Prominent Google Drive Scope & Transparency Disclosures */}
+          <div 
+            className="p-6 rounded-xl border flex flex-col gap-3.5 mb-11 shadow-sm"
+            style={{ 
+              borderColor: theme.surfaceBorder, 
+              backgroundColor: theme.background,
+              backgroundImage: 'linear-gradient(rgba(0,0,0,0.01), rgba(0,0,0,0.02))'
+            }}
+          >
+            <div className="flex items-center gap-2.5" style={{ color: theme.accent }}>
+              <Info className="w-5 h-5 shrink-0" />
+              <h3 className="font-sans font-bold text-xs tracking-wide uppercase">
+                Google Drive Cloud Sync & Verification Disclosure
+              </h3>
+            </div>
+            
+            <div className="text-xs leading-relaxed flex flex-col gap-3" style={{ color: theme.textSecondary }}>
+              <p>
+                To offer cross-device synchronization without hosting any custom cloud databases (which could compromise your private reflections), <strong>opnjrnl</strong> supports an <strong>optional, user-initiated backup integration to your own Google Drive storage</strong>.
+              </p>
+              
+              <p>
+                When you choose to authenticate with Google, our application requests access strictly through the official, restricted <strong><code className="px-1.5 py-0.5 rounded font-mono text-[10px] bg-black/5 dark:bg-white/10 text-current font-bold">https://www.googleapis.com/auth/drive.file</code></strong> scope.
+              </p>
+              
+              <ul className="list-disc pl-5 flex flex-col gap-1.5 font-sans mt-1">
+                <li>
+                  <strong>Scope Limit:</strong> The app CANNOT view, read, modify, or delete any other folders, slides, photos, or files in your Google Drive.
+                </li>
+                <li>
+                  <strong>Exclusive Purpose:</strong> Access is limited purely to managing a private backup inside the custom folder <code className="font-mono text-[10px] font-bold">opnjrnl_backup/</code> (file name: <code className="font-mono text-[10px] font-bold">opnjrnl_backup.json</code>) inside your secure workspace.
+                </li>
+                <li>
+                  <strong>Self-Custody Ownership:</strong> Your journal data is transferred securely between your browser and your private Google Drive directory over HTTPS. It is never processed, routed, analyzed, or gathered by us or any secondary servers. You have absolute custody of your text archives.
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          {/* Footer Navigation / Privacy Policy compliance */}
+          <div 
+            className="pt-6 border-t flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 text-[11px] font-sans"
+            style={{ borderColor: theme.surfaceBorder, color: theme.textSecondary }}
+          >
+            <div className="flex flex-wrap items-center gap-3">
+              <a 
+                href="privacy.html" 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                className="hover:underline font-semibold"
+                style={{ color: theme.accent }}
+              >
+                Privacy Policy
+              </a>
+              <span className="opacity-30">|</span>
+              <a 
+                href="https://ljzh04.github.io/opnjrnl/" 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                className="hover:underline font-medium opacity-80"
+              >
+                Homepage (Verified Owner Domain)
+              </a>
+            </div>
+            <div className="opacity-50">
+              Made with pure local confidentiality
+            </div>
+          </div>
+          
         </div>
       </div>
     );

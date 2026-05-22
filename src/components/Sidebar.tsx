@@ -343,6 +343,15 @@ export default function Sidebar({
                     <Cloud className="w-4 h-4" />
                     <span>{driveConnected ? 'Syncing to Drive (Connected)' : 'Connect Google Drive'}</span>
                   </button>
+                  <div className="border-t pt-3 text-[10px] leading-relaxed opacity-60 flex flex-col gap-1.5" style={{ borderColor: theme.surfaceBorder }}>
+                    <p className="font-bold uppercase tracking-wider">Storage & Drive Access Disclosure:</p>
+                    <p>
+                      opnjrnl prioritizes your privacy first. We request access with the restricted <strong>drive.file</strong> API scope to create a custom folder (<code className="font-mono text-[9px] font-semibold">opnjrnl_backup/</code>) containing a single backup file (<code className="font-mono text-[9px] font-semibold">opnjrnl_backup.json</code>) in your private Drive directory so you can sync notes securely. We cannot access or view other folders or assets. No third-party servers see or store your diary files. Open the document below for complete information.
+                    </p>
+                    <a href="privacy.html" target="_blank" rel="noopener noreferrer" className="underline font-bold text-blue-600 dark:text-blue-400 hover:opacity-100 block mt-0.5">
+                      Open Privacy Policy &rarr;
+                    </a>
+                  </div>
                 </div>
               </div>
 
