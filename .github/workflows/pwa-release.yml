@@ -1,35 +1,59 @@
-name: Build PWA to APK
+name: Build and Release Android APK
 
 on:
   push:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release Tag Name (for manual runs)'
+        required: false
+        default: 'v1.0.0'
 
 permissions:
   contents: write
 
 jobs:
   android-build:
-    name: Generate APK and Release
+    name: Generate APK via Bubblewrap
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # Uses Google's underlying Bubblewrap CLI to compile the APK
-      - name: PWA to APK Action
-        uses: sharadcodes/pwa-to-apk-action@v1.0.0
+      - name: Set up Java Development Kit (JDK)
+        uses: actions/setup-java@v4
         with:
-          # Replace this with the local folder where you initialized bubblewrap
-          project-root-folder: '.' 
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Installs the official Google Bubblewrap CLI engine
+      - name: Install Bubblewrap CLI
+        run: npm install -g @bubblewrap/cli
+
+      # Generates the Android project structures directly from your live PWA link
+      - name: Initialize and Build PWA to APK
+        run: |
+          bubblewrap init --manifest=https://ljzh04.github.io/opnjrnl/manifest.json --meta-validate --no-prompt
+          bubblewrap build --skipSigning
+          
+          # Move the compiled unsigned release APK to the main workspace directory
+          mv app-release-unsigned.apk $GITHUB_WORKSPACE/opnjrnl-release.apk
 
       - name: Create Release & Upload APK
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
           files: |
-            app-release-signed.apk
+            opnjrnl-release.apk
+          draft: false
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
