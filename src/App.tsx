@@ -9,8 +9,9 @@ import { MINIMAL_THEMES } from './themeData';
 import Sidebar from './components/Sidebar';
 import Editor from './components/Editor';
 import { v4 as uuidv4 } from 'uuid';
-import { ArrowLeft, RefreshCw } from 'lucide-react';
-import { get, set } from 'idb-keyval';
+import { ArrowLeft, RefreshCw, ArrowUpFromLine, ArrowDownToLine, Cloud, Info, AlertTriangle } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { get, set, del } from 'idb-keyval';
 import { initAuth, googleSignIn, getAccessToken, logout } from './lib/auth';
 import { registerDeviceLock, verifyDeviceLock } from './lib/webauthn';
 
@@ -20,6 +21,46 @@ const DRIVE_FILE_ID_KEY = 'minimal-journal-drive-file-id';
 const APP_PASSWORD_KEY = 'minimal-journal-password';
 const APP_SYSLOCK_KEY = 'minimal-journal-syslock';
 const APP_SETTINGS_KEY = 'minimal-journal-settings';
+
+const triggerNotification = async (title: string, body: string) => {
+  if (!("Notification" in window)) return;
+  
+  if (Notification.permission !== "granted") {
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted") return;
+  }
+
+  const isSubFolder = window.location.pathname.startsWith('/opnjrnl');
+  const iconUrl = isSubFolder ? '/opnjrnl/icon.svg' : '/icon.svg';
+
+  if ("serviceWorker" in navigator) {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      if (reg && "showNotification" in reg) {
+        await reg.showNotification(title, {
+          body: body,
+          icon: iconUrl,
+          badge: iconUrl,
+          vibrate: [200, 100, 200],
+          tag: 'opnjrnl-reminder',
+          renotify: true
+        } as any);
+        return;
+      }
+    } catch (e) {
+      console.warn("ServiceWorker showNotification failed, trying fallback:", e);
+    }
+  }
+
+  try {
+    new Notification(title, {
+      body: body,
+      icon: iconUrl
+    });
+  } catch (e) {
+    console.error("Standard Notification constructor failed:", e);
+  }
+};
 
 export default function App() {
   const [entries, setEntries] = useState<JournalEntry[]>([]);
@@ -56,6 +97,18 @@ export default function App() {
 
   // Cloud Sync properties
   const [driveConnected, setDriveConnected] = useState(false);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [syncErrorMessage, setSyncErrorMessage] = useState<string | null>(null);
+  const [showConfirmDisconnect, setShowConfirmDisconnect] = useState(false);
+  const [isConnectingDrive, setIsConnectingDrive] = useState(false);
+  const [syncChoiceData, setSyncChoiceData] = useState<{
+    accessToken: string;
+    user: any;
+    localCount: number;
+    cloudCount: number;
+    cloudEntries: any[];
+    activeFileId: string | null;
+  } | null>(null);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -146,34 +199,182 @@ export default function App() {
 
     // Initialize Auth
     initAuth(
-      (_user, _token) => setDriveConnected(true),
-      () => setDriveConnected(false)
+      (user, _token) => {
+        setDriveConnected(true);
+        setCurrentUser(user);
+      },
+      () => {
+        setDriveConnected(false);
+        setCurrentUser(null);
+      }
     );
   }, []);
 
-  const handleConnectDrive = async () => {
-    if (driveConnected) {
-      if (confirm("Disconnect from Google Drive? Your local entries remain preserved on this device.")) {
-        try {
-          await logout();
-          setDriveConnected(false);
-        } catch (err) {
-          console.error("Could not disconnect:", err);
+  const createOrUploadBackup = async (dataToSync: JournalEntry[], accessToken: string, existingFileId: string | null) => {
+    const mimeType = 'application/json';
+    const dataStr = JSON.stringify(dataToSync);
+    
+    if (existingFileId) {
+      const updateRes = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=media`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': mimeType
+        },
+        body: dataStr
+      });
+      if (!updateRes.ok) throw new Error("Cloud update failed");
+      await set(DRIVE_FILE_ID_KEY, existingFileId);
+    } else {
+      const metadata = {
+        name: 'opnjrnl_backup.json',
+        mimeType,
+        parents: ['appDataFolder']
+      };
+
+      const form = new FormData();
+      form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+      form.append('file', new Blob([dataStr], { type: mimeType }));
+
+      const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: form
+      });
+      const createdFile = await res.json();
+      if (createdFile.id) {
+        await set(DRIVE_FILE_ID_KEY, createdFile.id);
+      }
+    }
+  };
+
+  const handleResolveMerge = async () => {
+    if (!syncChoiceData) return;
+    const { accessToken, user, cloudEntries, activeFileId } = syncChoiceData;
+    
+    // Perform standard conflict-free merge
+    const map = new Map<string, JournalEntry>();
+    entries.forEach(e => map.set(e.id, e));
+    cloudEntries.forEach((e: any) => {
+      const existing = map.get(e.id);
+      if (!existing) {
+        map.set(e.id, e);
+      } else {
+        const existingTime = existing.updatedAt || existing.createdAt || 0;
+        const cloudTime = e.updatedAt || e.createdAt || 0;
+        if (cloudTime > existingTime) {
+          map.set(e.id, e);
         }
       }
+    });
+    const merged = Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);
+    
+    // Update local state and IndexedDB
+    setEntries(merged);
+    await set(ENTRIES_STORAGE_KEY, merged);
+    
+    // Upload consolidated data to Drive
+    await createOrUploadBackup(merged, accessToken, activeFileId);
+    
+    setDriveConnected(true);
+    setCurrentUser(user);
+    setSyncChoiceData(null);
+  };
+
+  const handleResolveOverwriteRemote = async () => {
+    if (!syncChoiceData) return;
+    const { accessToken, user, activeFileId } = syncChoiceData;
+    
+    // Upload local entries to Google Drive directly
+    await createOrUploadBackup(entries, accessToken, activeFileId);
+    
+    setDriveConnected(true);
+    setCurrentUser(user);
+    setSyncChoiceData(null);
+  };
+
+  const handleResolveOverwriteLocal = async () => {
+    if (!syncChoiceData) return;
+    const { accessToken, user, cloudEntries, activeFileId } = syncChoiceData;
+    
+    // Save cloud entries locally
+    setEntries(cloudEntries);
+    await set(ENTRIES_STORAGE_KEY, cloudEntries);
+    
+    // Establish DRIVE_FILE_ID_KEY
+    if (activeFileId) {
+      await set(DRIVE_FILE_ID_KEY, activeFileId);
+    }
+    
+    setDriveConnected(true);
+    setCurrentUser(user);
+    setSyncChoiceData(null);
+  };
+
+  const handleConnectDrive = async () => {
+    if (driveConnected) {
+      setShowConfirmDisconnect(true);
       return;
     }
 
+    setSyncErrorMessage(null);
+    setIsConnectingDrive(true);
     try {
       const res = await googleSignIn();
       if (res?.accessToken) {
-        setDriveConnected(true);
-        // Trigger a sync immediately and force conflict resolution/merging with any remote backup
-        await syncToDrive(entries, res.accessToken, true);
+        const accessToken = res.accessToken;
+        
+        // Find existing backup file inside Drive isolated AppData space
+        const fileQ = encodeURIComponent("name = 'opnjrnl_backup.json' and trashed = false");
+        const fileRes = await fetch(`https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${fileQ}&fields=files(id)`, {
+          headers: { Authorization: `Bearer ${accessToken}` }
+        });
+        const fileData = await fileRes.json();
+        
+        let activeFileId: string | null = null;
+        let cloudEntries: JournalEntry[] = [];
+        
+        if (fileData.files && fileData.files.length > 0) {
+          activeFileId = fileData.files[0].id;
+          try {
+            const downloadRes = await fetch(`https://www.googleapis.com/drive/v3/files/${activeFileId}?alt=media`, {
+              headers: { Authorization: `Bearer ${accessToken}` }
+            });
+            if (downloadRes.ok) {
+              const fetched = await downloadRes.json();
+              if (Array.isArray(fetched)) {
+                cloudEntries = fetched;
+              }
+            }
+          } catch (e) {
+            console.warn("Failed to download existing Drive backup:", e);
+          }
+        }
+        
+        // If there's a pre-existing backup with entries, show user management option dialog
+        if (activeFileId && cloudEntries.length > 0) {
+          setSyncChoiceData({
+            accessToken,
+            user: res.user,
+            localCount: entries.length,
+            cloudCount: cloudEntries.length,
+            cloudEntries,
+            activeFileId
+          });
+        } else {
+          // No cloud content or new account. Direct upload local state & connect
+          await createOrUploadBackup(entries, accessToken, activeFileId);
+          setDriveConnected(true);
+          setCurrentUser(res.user);
+        }
       }
     } catch (err) {
-      console.error("Could not sign in:", err);
-      alert("Failed to connect to Google Drive");
+      console.error("Could not connect to Google accounts:", err);
+      setSyncErrorMessage("Failed to connect to Google Drive. Please try again.");
+    } finally {
+      setIsConnectingDrive(false);
     }
   };
 
@@ -336,6 +537,16 @@ export default function App() {
     }
   }, [themeId, isLoaded]);
 
+  // Auto-clear sync error message after 5 seconds
+  useEffect(() => {
+    if (syncErrorMessage) {
+      const timer = setTimeout(() => {
+        setSyncErrorMessage(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [syncErrorMessage]);
+
   const handleSelectTheme = (id: string) => {
     if (MINIMAL_THEMES[id]) {
       setThemeId(id as MinimalThemeId);
@@ -389,6 +600,76 @@ export default function App() {
       setEntries(current => [deletedEntryState.entry, ...current].sort((a, b) => b.createdAt - a.createdAt));
       clearUndoState();
     }
+  };
+
+  const handleClearAllData = async (options?: { deleteCloudBackup?: boolean }) => {
+    // 1. Instantly clear any pending debounced backup syncs to prevent auto-overwrites
+    if (syncTimeoutRef.current) {
+      clearTimeout(syncTimeoutRef.current);
+      syncTimeoutRef.current = null;
+    }
+
+    // 2. Clear cloud boundaries before purging local data to prevent empty list sync
+    if (driveConnected) {
+      if (options?.deleteCloudBackup) {
+        try {
+          const accessToken = await getAccessToken();
+          if (accessToken) {
+            let fileId = await get<string>(DRIVE_FILE_ID_KEY);
+            if (!fileId) {
+              const fileQ = encodeURIComponent("name = 'opnjrnl_backup.json' and trashed = false");
+              const fileRes = await fetch(`https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${fileQ}&fields=files(id)`, {
+                headers: { Authorization: `Bearer ${accessToken}` }
+              });
+              const fileData = await fileRes.json();
+              if (fileData.files && fileData.files.length > 0) {
+                fileId = fileData.files[0].id;
+              }
+            }
+
+            if (fileId) {
+              console.log("Found backup file id. Initiating Cloud backup erasure:", fileId);
+              await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+                method: 'DELETE',
+                headers: { Authorization: `Bearer ${accessToken}` }
+              });
+              console.log("Cloud backup deleted successfully.");
+            }
+          }
+        } catch (err) {
+          console.error("Failed to delete remote cloud backup:", err);
+        }
+      }
+
+      // Automatically terminate authorization and unlink Google drive connection
+      try {
+        await logout();
+      } catch (err) {
+        console.error("Cloud logout execution error:", err);
+      }
+      setDriveConnected(false);
+      setCurrentUser(null);
+      await del(DRIVE_FILE_ID_KEY);
+    }
+
+    // 3. Purge active in-memory user workspace
+    setEntries([]);
+    setActiveEntryId(null);
+    clearUndoState();
+    setAppPassword(null);
+    setSystemLockId(null);
+
+    // 4. Wipe localizedIndexed DB stores
+    try {
+      await del(ENTRIES_STORAGE_KEY);
+      await del(APP_PASSWORD_KEY);
+      await del(APP_SYSLOCK_KEY);
+    } catch (err) {
+      console.error("Failed to delete local storage database partitions:", err);
+    }
+
+    localStorage.removeItem('patched-commit-sha');
+    localStorage.removeItem('last-notif-fired');
   };
 
   // Export JSON file
@@ -466,13 +747,8 @@ export default function App() {
         const todayStr = new Date().toDateString();
         const lastFired = localStorage.getItem('last-notif-fired');
         if (lastFired !== todayStr) {
-          if ("Notification" in window && Notification.permission === "granted") {
-            new Notification("Journal Reminder", {
-              body: "Time to log your day in your journal.",
-              icon: "/icon.svg"
-            });
-            localStorage.setItem('last-notif-fired', todayStr);
-          }
+          triggerNotification("Journal Reminder", "Time to log your day in your journal.");
+          localStorage.setItem('last-notif-fired', todayStr);
         }
       }
     }, 60000); // checks every minute...
@@ -502,7 +778,7 @@ export default function App() {
           <div className="w-4 h-4 rounded-full" style={{ backgroundColor: currentTheme.textPrimary }}></div>
         </div>
         <div className="flex flex-col items-center gap-2">
-          <h1 className="font-serif text-xl tracking-tight">Journal Locked</h1>
+          <h1 className="font-serif text-xl tracking-tight">Journal locked</h1>
           <p className="opacity-50">Authenticate to continue</p>
         </div>
         
@@ -519,7 +795,7 @@ export default function App() {
             className="w-full max-w-[240px] px-4 py-3 rounded-lg font-bold tracking-widest uppercase transition-all mt-4 shadow-sm active:scale-95 text-white"
             style={{ backgroundColor: currentTheme.accent }}
           >
-            Use Device Lock
+            Use device lock
           </button>
         )}
 
@@ -551,7 +827,7 @@ export default function App() {
                 color: currentTheme.textPrimary 
               }}
             />
-            {pwdError && <p className="text-rose-500 text-[10px] uppercase font-bold mt-2 text-center tracking-widest">Incorrect password</p>}
+            {pwdError && <p className="text-zinc-600 dark:text-zinc-400 text-[10px] mt-2 text-center">Incorrect password</p>}
           </div>
             <button 
               type="submit"
@@ -599,8 +875,10 @@ export default function App() {
           onToggleFavorites={() => setShowFavoritesOnly(!showFavoritesOnly)}
           onExport={handleExportData}
           onImport={handleImportData}
+          onClearAllData={handleClearAllData}
           onConnectDrive={handleConnectDrive}
           driveConnected={driveConnected}
+          currentUser={currentUser}
           appPassword={appPassword}
           onUpdateAppPassword={(pwd) => {
             setAppPassword(pwd);
@@ -621,38 +899,20 @@ export default function App() {
                Notification.requestPermission();
             }
           }}
+          onTestNotification={() => {
+            triggerNotification(
+              "Journal Reminder Test", 
+              "Success! Your daily garden reminder system is fully operational."
+            );
+          }}
         />
       </div>
 
-      {/* Editor container */}
+      {/* Desktop Editor container */}
       <div 
-        className={`flex-1 flex flex-col min-w-0 transition-colors duration-300 ${!activeEntryId ? 'hidden md:flex' : 'flex'}`}
+        className="hidden md:flex md:flex-1 md:flex-col min-w-0"
         style={{ backgroundColor: currentTheme.surface }}
       >
-        {/* Mobile secondary tool header */}
-        {activeEntryId && (
-          <div 
-            className="md:hidden px-6 py-4 flex items-center justify-between sticky top-0 z-10 transition-colors duration-300"
-            style={{ 
-              borderBottom: `1px solid ${currentTheme.surfaceBorder}`,
-              backgroundColor: currentTheme.surface,
-              color: currentTheme.textPrimary
-            }}
-          >
-            <button
-              onClick={() => setActiveEntryId(null)}
-              className="flex items-center text-xs font-medium tracking-wide transition-all uppercase cursor-pointer"
-              style={{ color: currentTheme.accent }}
-            >
-              <ArrowLeft className="w-4 h-4 mr-1.5" />
-              <span>Timeline</span>
-            </button>
-            <span className="text-[10px] tracking-[0.2em] uppercase font-semibold opacity-40 select-none">
-              Composition
-            </span>
-            <div className="w-12 shrink-0" /> {/* Spacer */}
-          </div>
-        )}
         <Editor
           entry={activeEntry}
           onUpdate={handleUpdateEntry}
@@ -661,6 +921,52 @@ export default function App() {
           entries={entries}
         />
       </div>
+
+      {/* Mobile Editor sliding container */}
+      <AnimatePresence>
+        {activeEntryId && (
+          <motion.div 
+            initial={{ x: "100%", opacity: 0.95 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: "100%", opacity: 0.95 }}
+            transition={{ type: "spring", damping: 26, stiffness: 220 }}
+            className="md:hidden fixed inset-0 z-40 flex flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)]"
+            style={{ backgroundColor: currentTheme.surface }}
+          >
+            {/* Mobile secondary tool header */}
+            <div 
+              className="px-6 py-4 flex items-center justify-between sticky top-0 z-10 transition-colors duration-300 shrink-0"
+              style={{ 
+                borderBottom: `1px solid ${currentTheme.surfaceBorder}`,
+                backgroundColor: currentTheme.surface,
+                color: currentTheme.textPrimary
+              }}
+            >
+              <button
+                onClick={() => setActiveEntryId(null)}
+                className="flex items-center text-xs font-medium tracking-wide transition-all uppercase cursor-pointer interactive-target-44"
+                style={{ color: currentTheme.accent }}
+              >
+                <ArrowLeft className="w-4 h-4 mr-1.5" />
+                <span>Timeline</span>
+              </button>
+              <span className="text-[10px] tracking-[0.2em] uppercase font-semibold opacity-44 select-none">
+                Composition
+              </span>
+              <div className="w-12 shrink-0" /> {/* Spacer */}
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              <Editor
+                entry={activeEntry}
+                onUpdate={handleUpdateEntry}
+                onDelete={handleDeleteEntry}
+                theme={currentTheme}
+                entries={entries}
+              />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {/* Undo Toast */}
       {deletedEntryState && (
         <div 
@@ -700,6 +1006,229 @@ export default function App() {
           <span className="font-medium tracking-wide">Tap back again to exit</span>
         </div>
       )}
+
+      {/* Cloud Sync Error Toast */}
+      <AnimatePresence>
+        {syncErrorMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 55, scale: 0.95 }}
+            className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3.5 rounded-full shadow-lg border text-xs font-sans bg-rose-500/15 border-rose-500/30 text-rose-500"
+            style={{ backdropFilter: 'blur(10px)' }}
+          >
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span className="font-semibold tracking-wide">{syncErrorMessage}</span>
+            <button 
+              onClick={() => setSyncErrorMessage(null)}
+              className="ml-2 font-bold opacity-75 hover:opacity-100 p-1 cursor-pointer"
+            >
+              ✕
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Disconnect Confirmation Custom Dialog */}
+      <AnimatePresence>
+        {showConfirmDisconnect && (
+          <div className="fixed inset-0 bg-black/40 dark:bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+            <div 
+              className="absolute inset-0 cursor-default" 
+              onClick={() => setShowConfirmDisconnect(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              transition={{ type: "spring", duration: 0.4 }}
+              className="w-full max-w-sm rounded-[24px] p-6.5 shadow-2xl border flex flex-col gap-5 font-sans relative z-10"
+              style={{ backgroundColor: currentTheme.surface, borderColor: currentTheme.surfaceBorder, color: currentTheme.textPrimary }}
+            >
+              <div className="flex gap-4 items-start">
+                <div className="w-11 h-11 shrink-0 rounded-full flex items-center justify-center bg-rose-500/10 text-rose-500">
+                  <Cloud className="w-5 h-5" />
+                </div>
+                <div className="flex flex-col gap-1.5 min-w-0">
+                  <h3 className="text-base font-bold tracking-tight">Disconnect Cloud Sync</h3>
+                  <p className="opacity-70 text-[11.5px] leading-relaxed">
+                    Are you sure you want to stop cloud backup? Your journal data remains safe on this device, but automatically syncing changes to Google Drive will pause.
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3 mt-1">
+                <button
+                  onClick={() => setShowConfirmDisconnect(false)}
+                  className="py-2.5 px-4 rounded-xl text-center font-bold tracking-tight transition-all hover:bg-black/[0.04] dark:hover:bg-white/[0.04] active:scale-95 border cursor-pointer inline-flex items-center justify-center bg-transparent text-xs"
+                  style={{ borderColor: currentTheme.surfaceBorder, color: currentTheme.textPrimary }}
+                >
+                  Keep Connected
+                </button>
+                <button
+                  onClick={async () => {
+                    try {
+                      await logout();
+                      setDriveConnected(false);
+                      setCurrentUser(null);
+                    } catch (e) {
+                      console.error(e);
+                    } finally {
+                      setShowConfirmDisconnect(false);
+                    }
+                  }}
+                  className="py-2.5 px-4 rounded-xl text-center font-bold tracking-tight transition-all bg-rose-500 hover:bg-rose-600 active:scale-95 text-white cursor-pointer shadow-sm text-center inline-flex items-center justify-center text-xs"
+                >
+                  Disconnect Sync
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Cloud Sync Reconcile Choices Dialog */}
+      <AnimatePresence>
+        {syncChoiceData && (
+          <div className="fixed inset-0 bg-black/40 dark:bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+            <div 
+              className="absolute inset-0 cursor-default" 
+              onClick={() => {
+                logout();
+                setSyncChoiceData(null);
+              }}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              transition={{ type: "spring", duration: 0.4 }}
+              className="w-full max-w-lg max-h-[90vh] sm:max-h-[85vh] overflow-y-auto rounded-2xl md:rounded-3xl p-5 sm:p-6 md:p-8 shadow-2xl border flex flex-col gap-4 sm:gap-5.5 font-sans relative z-10 text-left scrollbar-thin"
+              style={{ backgroundColor: currentTheme.surface, borderColor: currentTheme.surfaceBorder, color: currentTheme.textPrimary }}
+            >
+              <div className="flex flex-col gap-1 pr-4">
+                <span className="text-[10px] tracking-widest uppercase opacity-45 font-bold font-mono">Google Cloud Sync</span>
+                <h3 className="text-xl font-bold font-serif tracking-tight">Chapters Alignment Options</h3>
+                <p className="opacity-70 text-xs leading-relaxed mt-1">
+                  Welcome back, <span className="font-semibold">{syncChoiceData.user?.displayName || "Writer"}</span>. We found pre-existing chapters in your Google Drive storage. Choose how you would like to run this device's synchronization:
+                </p>
+              </div>
+
+              {/* Counts Grid Comparison */}
+              <div className="grid grid-cols-2 gap-3 text-center">
+                <div className="rounded-2xl border p-4 flex flex-col items-center gap-0.5" style={{ borderColor: currentTheme.surfaceBorder, backgroundColor: currentTheme.surface }}>
+                  <span className="text-[9px] tracking-wider uppercase opacity-40 font-mono font-bold">Local Device</span>
+                  <span className="text-2xl font-serif font-black">{syncChoiceData.localCount}</span>
+                  <span className="text-[10px] opacity-60">journal pages</span>
+                </div>
+                <div className="rounded-2xl border p-4 flex flex-col items-center gap-0.5" style={{ borderColor: currentTheme.surfaceBorder, backgroundColor: currentTheme.surface }}>
+                  <span className="text-[9px] tracking-wider uppercase opacity-40 font-mono font-bold">Google Cloud copy</span>
+                  <span className="text-2xl font-serif font-black">{syncChoiceData.cloudCount}</span>
+                  <span className="text-[10px] opacity-60">remote pages</span>
+                </div>
+              </div>
+
+              {/* Selectable resolution options */}
+              <div className="flex flex-col gap-3">
+                {/* 1. Merge (Recommended) */}
+                <button
+                  onClick={handleResolveMerge}
+                  className="w-full p-4 rounded-2xl border text-left flex gap-3.5 hover:bg-black/[0.02] dark:hover:bg-white/[0.02] active:scale-98 transition-all duration-200 cursor-pointer text-xs"
+                  style={{ borderColor: currentTheme.accent }}
+                >
+                  <div className="w-9 h-9 rounded-full shrink-0 flex items-center justify-center bg-blue-500/10 text-blue-500">
+                    <RefreshCw className="w-4.5 h-4.5" />
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-bold tracking-tight text-sm">Merge & Combine Entries</span>
+                      <span className="px-1.5 py-0.5 rounded-full text-[8px] font-bold tracking-wider uppercase bg-blue-500/10 text-blue-500 font-sans">
+                        Recommended
+                      </span>
+                    </div>
+                    <p className="opacity-75 text-[10.5px] leading-relaxed mt-1">
+                      Merges both local and cloud chapters together neatly. If any modifications conflict, the latest edit timestamps win. No data will be lost.
+                    </p>
+                  </div>
+                </button>
+
+                {/* 2. Overwrite Remote (Keep Local) */}
+                <button
+                  onClick={handleResolveOverwriteRemote}
+                  className="w-full p-4 rounded-2xl border text-left flex gap-3.5 hover:bg-black/[0.02] dark:hover:bg-white/[0.02] active:scale-98 transition-all duration-200 cursor-pointer text-xs"
+                  style={{ borderColor: currentTheme.surfaceBorder }}
+                >
+                  <div className="w-9 h-9 rounded-full shrink-0 flex items-center justify-center bg-zinc-500/10 text-zinc-500">
+                    <ArrowUpFromLine className="w-4.5 h-4.5" />
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <span className="font-bold tracking-tight text-sm">Upload local chapters</span>
+                    <p className="opacity-75 text-[10.5px] leading-relaxed mt-1">
+                      Replaces the archive in Google Cloud with pages present on this local device. (Local state replaces Cloud backup)
+                    </p>
+                  </div>
+                </button>
+
+                {/* 3. Overwrite Local (Download Cloud) */}
+                <button
+                  onClick={handleResolveOverwriteLocal}
+                  className="w-full p-4 rounded-2xl border text-left flex gap-3.5 hover:bg-black/[0.02] dark:hover:bg-white/[0.02] active:scale-98 transition-all duration-200 cursor-pointer text-xs"
+                  style={{ borderColor: currentTheme.surfaceBorder }}
+                >
+                  <div className="w-9 h-9 rounded-full shrink-0 flex items-center justify-center bg-zinc-500/10 text-zinc-500">
+                    <ArrowDownToLine className="w-4.5 h-4.5" />
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <span className="font-bold tracking-tight text-sm">Restore from backup</span>
+                    <p className="opacity-75 text-[10.5px] leading-relaxed mt-1">
+                      Completely replaces local chapters on this device with the chapters present in your cloud backup.
+                    </p>
+                  </div>
+                </button>
+              </div>
+
+              <div className="flex justify-center pt-2">
+                <button
+                  onClick={() => {
+                    logout();
+                    setSyncChoiceData(null);
+                  }}
+                  className="text-[10px] font-bold tracking-wider uppercase opacity-45 hover:opacity-100 transition-opacity p-2 cursor-pointer"
+                >
+                  Cancel cloud integration
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Cloud Sync Progress Blocking Dialog */}
+      <AnimatePresence>
+        {isConnectingDrive && (
+          <div className="fixed inset-0 bg-black/60 dark:bg-black/85 backdrop-blur-md z-[100] flex items-center justify-center p-4 select-none">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              transition={{ type: "spring", duration: 0.4 }}
+              className="w-full max-w-xs rounded-3xl p-6 shadow-2xl border flex flex-col items-center gap-5 font-sans justify-center text-center relative z-10"
+              style={{ backgroundColor: currentTheme.surface, borderColor: currentTheme.surfaceBorder, color: currentTheme.textPrimary }}
+            >
+              <div className="relative flex items-center justify-center w-14 h-14">
+                <RefreshCw className="w-8 h-8 text-blue-500 animate-spin" />
+                <Cloud className="w-4 h-4 text-blue-500 absolute" />
+              </div>
+              <div className="flex flex-col gap-1.5 min-w-0">
+                <span className="text-[10px] tracking-widest uppercase opacity-45 font-bold font-mono">Google Cloud Sync</span>
+                <h3 className="text-sm font-bold tracking-tight">Connecting to Google</h3>
+                <p className="opacity-70 text-[11px] leading-relaxed">
+                  Authenticating and establishing secure connection to your personal Google Drive storage. This will take just a moment...
+                </p>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

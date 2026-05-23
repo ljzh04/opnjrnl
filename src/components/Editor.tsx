@@ -78,11 +78,12 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [title, content]);
 
-  // Auto-resize title textarea
+  // Auto-resize title textarea with a defensive maximum size constraint
   useEffect(() => {
     if (titleRef.current) {
       titleRef.current.style.height = 'auto';
-      titleRef.current.style.height = titleRef.current.scrollHeight + 'px';
+      const calculatedHeight = Math.min(titleRef.current.scrollHeight, 140);
+      titleRef.current.style.height = calculatedHeight + 'px';
     }
   }, [title]);
 
@@ -219,7 +220,7 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
                   opnjrnl
                 </h1>
                 <p className="text-[9px] uppercase tracking-[0.2em] opacity-50 font-mono">
-                  Autonomous Personal Ledger
+                  Autonomous personal ledger
                 </p>
               </div>
             </div>
@@ -241,7 +242,7 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
             >
               <div className="flex items-center gap-2 mb-1" style={{ color: theme.textPrimary }}>
                 <Shield className="w-4 h-4 opacity-80" />
-                <h3 className="font-sans font-semibold text-xs tracking-wide uppercase">100% Privacy & Local-First</h3>
+                <h3 className="font-sans font-semibold text-xs tracking-wide uppercase">100% privacy & local-first</h3>
               </div>
               <p className="text-xs leading-relaxed opacity-70" style={{ color: theme.textSecondary }}>
                 All written chapters, mood data, tags, and favorites are stored directly inside your browser's local sandbox memory (IndexedDB). No analytics, trackers, or centralized servers ever receive or parse your memories.
@@ -254,7 +255,7 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
             >
               <div className="flex items-center gap-2 mb-1" style={{ color: theme.textPrimary }}>
                 <Lock className="w-4 h-4 opacity-80" />
-                <h3 className="font-sans font-semibold text-xs tracking-wide uppercase">Local Screen Lock & Passwords</h3>
+                <h3 className="font-sans font-semibold text-xs tracking-wide uppercase">Local screen lock & passwords</h3>
               </div>
               <p className="text-xs leading-relaxed opacity-70" style={{ color: theme.textSecondary }}>
                 Safeguard the contents of your app against physical intruders using state-of-the-art WebAuthn biometric security (Face ID / Touch ID) or setup a traditional custom encrypted app passcode in your settings.
@@ -267,7 +268,7 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
             >
               <div className="flex items-center gap-2 mb-1" style={{ color: theme.textPrimary }}>
                 <Smile className="w-4 h-4 opacity-80" />
-                <h3 className="font-sans font-semibold text-xs tracking-wide uppercase">Intuitive Organization</h3>
+                <h3 className="font-sans font-semibold text-xs tracking-wide uppercase">Intuitive organization</h3>
               </div>
               <p className="text-xs leading-relaxed opacity-70" style={{ color: theme.textSecondary }}>
                 Easily index, filter, and track patterns over time with natural daily mood tags, smart inline keyword indexing, favorite markers, automatic tag suggestions, and lightning-fast fuzzy global search.
@@ -280,9 +281,9 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
             >
               <div className="flex items-center gap-2 mb-1" style={{ color: theme.textPrimary }}>
                 <Sparkles className="w-4 h-4 opacity-80" />
-                <h3 className="font-sans font-semibold text-xs tracking-wide uppercase">Visual Ease Themes</h3>
+                <h3 className="font-sans font-semibold text-xs tracking-wide uppercase">Visual ease themes</h3>
               </div>
-              <p className="text-xs leading-relaxed opacity-70" style={{ color: theme.textSecondary }}>
+              <p className="text-xs leading-relaxed opacity-70 font-sans" style={{ color: theme.textSecondary }}>
                 Tailor your writing canvas to your immediate reading conditions. Effortlessly cycle between beautiful distraction-free styles like Warm Paper, Creamy Vintage, or Charcoal Midnight interfaces.
               </p>
             </div>
@@ -300,7 +301,7 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
             <div className="flex items-center gap-2.5" style={{ color: theme.accent }}>
               <Info className="w-5 h-5 shrink-0" />
               <h3 className="font-sans font-bold text-xs tracking-wide uppercase">
-                Google Drive Cloud Sync & Verification Disclosure
+                Google Drive cloud sync & verification disclosure
               </h3>
             </div>
             
@@ -315,13 +316,13 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
               
               <ul className="list-disc pl-5 flex flex-col gap-1.5 font-sans mt-1">
                 <li>
-                  <strong>Scope Limit:</strong> The app CANNOT view, read, modify, or delete any of your files, folders, documents, or photos in your Google Drive.
+                  <strong>Scope limit:</strong> The app CANNOT view, read, modify, or delete any of your files, folders, documents, or photos in your Google Drive.
                 </li>
                 <li>
-                  <strong>Exclusive Purpose:</strong> Access is limited strictly to creating and updating its own hidden configuration and backup data (<code className="font-mono text-[10px] font-bold">opnjrnl_backup.json</code>) inside an application-isolated directory. This folder is managed solely by Google Drive for this app and is completely invisible to other applications and search indexers.
+                  <strong>Exclusive purpose:</strong> Access is limited strictly to creating and updating its own hidden configuration and backup data (<code className="font-mono text-[10px] font-bold">opnjrnl_backup.json</code>) inside an application-isolated directory. This folder is managed solely by Google Drive for this app and is completely invisible to other applications and search indexers.
                 </li>
                 <li>
-                  <strong>Self-Custody Ownership:</strong> Your journal data is transferred securely and directly between your browser database and your personal Google Drive storage space over HTTPS. It is never transmitted, processed, or logged by opnjrnl or any other third-party servers.
+                  <strong>Self-custody ownership:</strong> Your journal data is transferred securely and directly between your browser database and your personal Google Drive storage space over HTTPS. It is never transmitted, processed, or logged by opnjrnl or any other third-party servers.
                 </li>
               </ul>
             </div>
@@ -340,7 +341,7 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
                 className="hover:underline font-semibold"
                 style={{ color: theme.accent }}
               >
-                Privacy Policy
+                Privacy policy
               </a>
               <span className="opacity-30">|</span>
               <a 
@@ -458,7 +459,7 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Untitled page"
-            className="text-3xl md:text-4xl font-serif text-zinc-900 border-none outline-none bg-transparent resize-none focus:ring-0 leading-snug block w-full py-0 font-semibold placeholder:text-zinc-300 dark:placeholder:text-zinc-600 mb-4 md:mb-5 overflow-hidden"
+            className="text-3xl md:text-4xl font-serif text-zinc-900 border-none outline-none bg-transparent resize-none focus:ring-0 leading-snug block w-full py-0 font-semibold placeholder:text-zinc-300 dark:placeholder:text-zinc-600 mb-4 md:mb-5 max-h-[140px] overflow-y-auto scrollbar-none"
             style={{ color: theme.textPrimary }}
             rows={1}
           />
@@ -605,7 +606,7 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
             value={content}
             onChange={(e) => setContent(e.target.value)}
             placeholder="Begin writing..."
-            className="w-full flex-1 text-base md:text-lg font-serif leading-[1.8] border-none outline-none bg-transparent resize-none focus:ring-0 py-2 min-h-0 overflow-y-auto scrollbar-thin md:scrollbar-thin"
+            className="w-full flex-1 max-w-[65ch] prose-measure mx-auto text-base md:text-lg font-serif leading-[1.8] border-none outline-none bg-transparent resize-none focus:ring-0 py-2 min-h-0 overflow-y-auto scrollbar-thin md:scrollbar-thin"
             style={{ color: theme.textPrimary }}
           />
         </div>

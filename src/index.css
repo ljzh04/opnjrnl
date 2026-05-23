@@ -7,8 +7,89 @@
   --font-serif: "Playfair Display", ui-serif, Georgia, serif;
 }
 
+/* 1. Architectural Token System (Primitive & Semantic Roots) */
+:root {
+  /* Primitive Tokens (sys) - Global Raw Values */
+  --sys-color-blue-500: #2563eb;
+  --sys-color-blue-600: #1d4ed8;
+  --sys-radius-sm: 6px;
+  --sys-radius-md: 12px;
+  --sys-radius-lg: 16px;
+  --sys-radius-full: 9999px;
+
+  /* Semantic Tokens (sem) - Alias Abstractions */
+  --sem-color-focus-ring: rgba(37, 99, 235, 0.4);
+  --sem-transition-micro: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --sem-transition-macro: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+  --sem-transition-pop: 250ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* 2. Global Behavioral Base Rules & Accessible Focus */
 body {
   overscroll-behavior: none;
   -webkit-tap-highlight-color: transparent;
   font-family: var(--font-sans);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Agnostic Keyboard Focus Indicators */
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid var(--sys-color-blue-500);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--sem-color-focus-ring);
+}
+
+/* Hide focus rings normally */
+input:focus,
+textarea:focus,
+button:focus {
+  outline: none;
+}
+
+/* 3. High-Fidelity Font-Measure Limit Defenses */
+.prose-measure {
+  max-width: 65ch; /* Maximum typographic line measure to eliminate reading fatigue */
+}
+
+/* 4. Fine-Tune Scrollbar UX Parameters */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(100, 100, 100, 0.15);
+  border-radius: var(--sys-radius-full);
+}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 100, 100, 0.3);
+}
+
+/* Disable default outer margins of lists for cleaner grids */
+ul, ol {
+  padding-left: 1.25rem;
+}
+
+/* 5. Fluid Responsive Utility Animators */
+.animate-micro-ease {
+  transition: all var(--sem-transition-micro);
+}
+.animate-macro-ease {
+  transition: all var(--sem-transition-macro);
+}
+.animate-pop-ease {
+  transition: all var(--sem-transition-pop);
+}
+
+/* Touch targets enforcement */
+.interactive-target-44 {
+  min-height: 44px;
+  min-width: 44px;
 }
