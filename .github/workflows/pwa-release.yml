@@ -37,6 +37,15 @@ jobs:
       - name: Install Bubblewrap CLI
         run: npm install -g @bubblewrap/cli
 
+      # Generates the configuration file to bypass the interactive setup wizard
+      - name: Configure Bubblewrap Paths
+        run: |
+          mkdir -p ~/.bubblewrap
+          echo '{
+            "jdkPath": "'$JAVA_HOME'",
+            "androidSdkPath": "'$ANDROID_HOME'"
+          }' > ~/.bubblewrap/config.json
+
       # Generates the Android project structures directly from your live PWA link
       - name: Initialize and Build PWA to APK
         run: |
@@ -45,7 +54,7 @@ jobs:
           
           # Move the compiled unsigned release APK to the main workspace directory
           mv app-release-unsigned.apk $GITHUB_WORKSPACE/opnjrnl-release.apk
-
+          
       - name: Create Release & Upload APK
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
