@@ -36,7 +36,6 @@ body {
 /* Agnostic Keyboard Focus Indicators */
 button:focus-visible,
 input:focus-visible,
-textarea:focus-visible,
 select:focus-visible,
 [role="button"]:focus-visible {
   outline: 2px solid var(--sys-color-blue-500);
@@ -46,7 +45,6 @@ select:focus-visible,
 
 /* Hide focus rings normally */
 input:focus,
-textarea:focus,
 button:focus {
   outline: none;
 }
@@ -56,20 +54,47 @@ button:focus {
   max-width: 65ch; /* Maximum typographic line measure to eliminate reading fatigue */
 }
 
-/* 4. Fine-Tune Scrollbar UX Parameters */
-.scrollbar-thin::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+/* 4. Fine-Tune Scrollbar UX Parameters (Creative Diary Theme) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(150, 150, 150, 0.25) transparent;
 }
-.scrollbar-thin::-webkit-scrollbar-track {
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
   background: transparent;
+  border-left: 2px solid rgba(150, 150, 150, 0.08);
 }
-.scrollbar-thin::-webkit-scrollbar-thumb {
-  background: rgba(100, 100, 100, 0.15);
+::-webkit-scrollbar-thumb {
+  background-color: rgba(150, 150, 150, 0.25);
+  border: 3px solid transparent;
+  background-clip: content-box;
   border-radius: var(--sys-radius-full);
 }
-.scrollbar-thin::-webkit-scrollbar-thumb:hover {
-  background: rgba(100, 100, 100, 0.3);
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(150, 150, 150, 0.4);
+}
+::-webkit-scrollbar-button:single-button {
+  background-color: transparent;
+  display: block;
+  height: 12px;
+  width: 12px;
+  background-size: 8px;
+  background-repeat: no-repeat;
+  background-position: center;
+  opacity: 0.3;
+}
+::-webkit-scrollbar-button:single-button:hover {
+  opacity: 0.6;
+}
+::-webkit-scrollbar-button:single-button:vertical:decrement {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='18 15 12 9 6 15'></polyline></svg>");
+}
+::-webkit-scrollbar-button:single-button:vertical:increment {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>");
 }
 
 /* Disable default outer margins of lists for cleaner grids */

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect, ChangeEvent, useRef } from 'react';
+import { useState, useEffect, ChangeEvent, useRef, useCallback, useMemo } from 'react';
 import { JournalEntry, MinimalThemeId } from './types';
 import { MINIMAL_THEMES } from './themeData';
 import Sidebar from './components/Sidebar';
@@ -67,6 +67,14 @@ export default function App() {
   const [themeId, setThemeId] = useState<MinimalThemeId>('paper');
   const [isLoaded, setIsLoaded] = useState(false);
   const [activeEntryId, setActiveEntryId] = useState<string | null>(null);
+  const [lastKnownEntry, setLastKnownEntry] = useState<JournalEntry | null>(null);
+
+  useEffect(() => {
+    if (activeEntryId) {
+      const entry = entries.find(e => e.id === activeEntryId);
+      if (entry) setLastKnownEntry(entry);
+    }
+  }, [activeEntryId, entries]);
 
   // App Lock & Settings
   const [appLocked, setAppLocked] = useState<boolean>(false);
@@ -100,7 +108,8 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [syncErrorMessage, setSyncErrorMessage] = useState<string | null>(null);
   const [showConfirmDisconnect, setShowConfirmDisconnect] = useState(false);
-  const [isConnectingDrive, setIsConnectingDrive] = useState(false);
+  const [isSyncingBackground, setIsSyncingBackground] = useState(false);
+  const [cloudProgressScreen, setCloudProgressScreen] = useState<{ title: string; subtitle: string } | null>(null);
   const [syncChoiceData, setSyncChoiceData] = useState<{
     accessToken: string;
     user: any;
@@ -252,6 +261,7 @@ export default function App() {
 
   const handleResolveMerge = async () => {
     if (!syncChoiceData) return;
+    setCloudProgressScreen({ title: 'Merging Chapters', subtitle: 'Analyzing conflict states and generating consolidated cloud backup...' });
     const { accessToken, user, cloudEntries, activeFileId } = syncChoiceData;
     
     // Perform standard conflict-free merge
@@ -281,10 +291,12 @@ export default function App() {
     setDriveConnected(true);
     setCurrentUser(user);
     setSyncChoiceData(null);
+    setCloudProgressScreen(null);
   };
 
   const handleResolveOverwriteRemote = async () => {
     if (!syncChoiceData) return;
+    setCloudProgressScreen({ title: 'Uploading Data', subtitle: 'Overwriting the backup in Google Cloud with your local instance state...' });
     const { accessToken, user, activeFileId } = syncChoiceData;
     
     // Upload local entries to Google Drive directly
@@ -293,10 +305,12 @@ export default function App() {
     setDriveConnected(true);
     setCurrentUser(user);
     setSyncChoiceData(null);
+    setCloudProgressScreen(null);
   };
 
   const handleResolveOverwriteLocal = async () => {
     if (!syncChoiceData) return;
+    setCloudProgressScreen({ title: 'Restoring Backup', subtitle: 'Downloading chapters from your Google Drive backup space...' });
     const { accessToken, user, cloudEntries, activeFileId } = syncChoiceData;
     
     // Save cloud entries locally
@@ -311,6 +325,7 @@ export default function App() {
     setDriveConnected(true);
     setCurrentUser(user);
     setSyncChoiceData(null);
+    setCloudProgressScreen(null);
   };
 
   const handleConnectDrive = async () => {
@@ -320,7 +335,7 @@ export default function App() {
     }
 
     setSyncErrorMessage(null);
-    setIsConnectingDrive(true);
+    setCloudProgressScreen({ title: 'Connecting to Google', subtitle: 'Authenticating and establishing secure connection to your personal Google Drive storage. This will take just a moment...' });
     try {
       const res = await googleSignIn();
       if (res?.accessToken) {
@@ -374,7 +389,64 @@ export default function App() {
       console.error("Could not connect to Google accounts:", err);
       setSyncErrorMessage("Failed to connect to Google Drive. Please try again.");
     } finally {
-      setIsConnectingDrive(false);
+      setCloudProgressScreen(null);
+    }
+  };
+
+  const handleManualSync = async () => {
+    if (!driveConnected || !currentUser) return;
+    setSyncErrorMessage(null);
+    setCloudProgressScreen({ title: 'Synchronizing', subtitle: 'Fetching remote state from Google Drive...' });
+    try {
+      const accessToken = await getAccessToken();
+      if (!accessToken) throw new Error("No access token available for manual sync");
+      
+      const fileQ = encodeURIComponent("name = 'opnjrnl_backup.json' and trashed = false");
+      const fileRes = await fetch(`https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${fileQ}&fields=files(id)`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      if (!fileRes.ok) throw new Error("Failed to search Drive space");
+      const fileData = await fileRes.json();
+      
+      let activeFileId: string | null = null;
+      let cloudEntries: JournalEntry[] = [];
+      
+      if (fileData.files && fileData.files.length > 0) {
+        activeFileId = fileData.files[0].id;
+        try {
+          const downloadRes = await fetch(`https://www.googleapis.com/drive/v3/files/${activeFileId}?alt=media`, {
+            headers: { Authorization: `Bearer ${accessToken}` }
+          });
+          if (downloadRes.ok) {
+            const fetched = await downloadRes.json();
+            if (Array.isArray(fetched)) {
+              cloudEntries = fetched;
+            }
+          }
+        } catch (e) {
+          console.warn("Failed to download existing Drive backup during manual sync:", e);
+        }
+      }
+      
+      // If we found remote entries, pop the choices dialog. Otherwise just push local state.
+      if (activeFileId && cloudEntries.length > 0) {
+        setSyncChoiceData({
+          accessToken,
+          user: currentUser,
+          localCount: entries.length,
+          cloudCount: cloudEntries.length,
+          cloudEntries,
+          activeFileId,
+          isManualSync: true
+        });
+      } else {
+        await createOrUploadBackup(entries, accessToken, activeFileId);
+      }
+    } catch (err) {
+      console.error("Manual sync error:", err);
+      setSyncErrorMessage("Manual sync failed. Please check your connection.");
+    } finally {
+      setCloudProgressScreen(null);
     }
   };
 
@@ -382,6 +454,8 @@ export default function App() {
     const accessToken = token || await getAccessToken();
     if (!accessToken) return;
 
+    setSyncErrorMessage(null);
+    setIsSyncingBackground(true);
     try {
       let fileId = await get<string>(DRIVE_FILE_ID_KEY);
       const dataStr = JSON.stringify(dataToSync);
@@ -511,6 +585,9 @@ export default function App() {
 
     } catch (err) {
       console.error("Drive sync error:", err);
+      setSyncErrorMessage("Background sync failed. Please check your connection.");
+    } finally {
+      setIsSyncingBackground(false);
     }
   };
 
@@ -567,29 +644,29 @@ export default function App() {
     setActiveEntryId(newEntry.id);
   };
 
-  const handleUpdateEntry = (id: string, updates: Partial<JournalEntry>) => {
+  const handleUpdateEntry = useCallback((id: string, updates: Partial<JournalEntry>) => {
     setEntries(current =>
       current.map(entry =>
         entry.id === id ? { ...entry, ...updates } : entry
       )
     );
-  };
+  }, []);
 
-  const handleDeleteEntry = (id: string) => {
-    const entryToDelete = entries.find(e => e.id === id);
-    if (entryToDelete) {
-      setDeletedEntryState({ entry: entryToDelete });
-      if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
-      undoTimeoutRef.current = setTimeout(() => {
-        setDeletedEntryState(null);
-      }, 10000); // UI lasts for 10 seconds
-    }
+  const handleDeleteEntry = useCallback((id: string) => {
+    setEntries(current => {
+      const entryToDelete = current.find(e => e.id === id);
+      if (entryToDelete) {
+        setDeletedEntryState({ entry: entryToDelete });
+        if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
+        undoTimeoutRef.current = setTimeout(() => {
+          setDeletedEntryState(null);
+        }, 10000); // UI lasts for 10 seconds
+      }
+      return current.filter(entry => entry.id !== id);
+    });
 
-    setEntries(current => current.filter(entry => entry.id !== id));
-    if (activeEntryId === id) {
-      setActiveEntryId(null);
-    }
-  };
+    setActiveEntryId(current => (current === id ? null : current));
+  }, []);
 
   const handleUndoDelete = (e?: any) => {
     if (e) {
@@ -757,7 +834,19 @@ export default function App() {
   }, [notificationsEnabled, notificationTime]);
 
   const currentTheme = MINIMAL_THEMES[themeId] || MINIMAL_THEMES.paper;
-  const activeEntry = entries.find(e => e.id === activeEntryId) || null;
+  const activeEntry = entries.find(e => e.id === activeEntryId) || lastKnownEntry || null;
+
+  const tagsString = useMemo(() => {
+    return Array.from(new Set<string>(entries.flatMap(e => e.tags || [])))
+      .map(t => t.trim())
+      .filter(Boolean)
+      .sort()
+      .join(',');
+  }, [entries]);
+
+  const allUserTags = useMemo(() => {
+    return tagsString ? tagsString.split(',') : [];
+  }, [tagsString]);
 
   if (!isLoaded) {
     return (
@@ -849,9 +938,7 @@ export default function App() {
     >
       {/* Sidebar container */}
       <div 
-        className={`transition-all duration-300 ease-in-out shrink-0 h-full ${
-          activeEntryId ? 'hidden md:flex md:w-[350px] lg:w-[390px]' : 'flex w-full md:w-[350px] lg:w-[390px]'
-        }`}
+        className={`transition-all duration-300 ease-in-out shrink-0 h-full flex w-full md:w-[350px] lg:w-[390px]`}
       >
         <Sidebar
           entries={entries}
@@ -877,7 +964,10 @@ export default function App() {
           onImport={handleImportData}
           onClearAllData={handleClearAllData}
           onConnectDrive={handleConnectDrive}
+          onManualSync={handleManualSync}
           driveConnected={driveConnected}
+          isSyncingBackground={isSyncingBackground}
+          syncError={!!syncErrorMessage}
           currentUser={currentUser}
           appPassword={appPassword}
           onUpdateAppPassword={(pwd) => {
@@ -918,7 +1008,7 @@ export default function App() {
           onUpdate={handleUpdateEntry}
           onDelete={handleDeleteEntry}
           theme={currentTheme}
-          entries={entries}
+          allUserTags={allUserTags}
         />
       </div>
 
@@ -926,6 +1016,7 @@ export default function App() {
       <AnimatePresence>
         {activeEntryId && (
           <motion.div 
+            key="mobile-editor"
             initial={{ x: "100%", opacity: 0.95 }}
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: "100%", opacity: 0.95 }}
@@ -961,7 +1052,7 @@ export default function App() {
                 onUpdate={handleUpdateEntry}
                 onDelete={handleDeleteEntry}
                 theme={currentTheme}
-                entries={entries}
+                allUserTags={allUserTags}
               />
             </div>
           </motion.div>
@@ -1093,7 +1184,9 @@ export default function App() {
             <div 
               className="absolute inset-0 cursor-default" 
               onClick={() => {
-                logout();
+                if (!syncChoiceData.isManualSync) {
+                  logout();
+                }
                 setSyncChoiceData(null);
               }}
             />
@@ -1189,12 +1282,14 @@ export default function App() {
               <div className="flex justify-center pt-2">
                 <button
                   onClick={() => {
-                    logout();
+                    if (!syncChoiceData.isManualSync) {
+                      logout();
+                    }
                     setSyncChoiceData(null);
                   }}
                   className="text-[10px] font-bold tracking-wider uppercase opacity-45 hover:opacity-100 transition-opacity p-2 cursor-pointer"
                 >
-                  Cancel cloud integration
+                  {syncChoiceData.isManualSync ? "Cancel manual sync" : "Cancel cloud integration"}
                 </button>
               </div>
             </motion.div>
@@ -1204,7 +1299,7 @@ export default function App() {
 
       {/* Cloud Sync Progress Blocking Dialog */}
       <AnimatePresence>
-        {isConnectingDrive && (
+        {cloudProgressScreen && (
           <div className="fixed inset-0 bg-black/60 dark:bg-black/85 backdrop-blur-md z-[100] flex items-center justify-center p-4 select-none">
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 15 }}
@@ -1220,9 +1315,9 @@ export default function App() {
               </div>
               <div className="flex flex-col gap-1.5 min-w-0">
                 <span className="text-[10px] tracking-widest uppercase opacity-45 font-bold font-mono">Google Cloud Sync</span>
-                <h3 className="text-sm font-bold tracking-tight">Connecting to Google</h3>
+                <h3 className="text-sm font-bold tracking-tight">{cloudProgressScreen.title}</h3>
                 <p className="opacity-70 text-[11px] leading-relaxed">
-                  Authenticating and establishing secure connection to your personal Google Drive storage. This will take just a moment...
+                  {cloudProgressScreen.subtitle}
                 </p>
               </div>
             </motion.div>

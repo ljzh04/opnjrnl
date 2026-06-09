@@ -22,7 +22,7 @@ import {
   User,
   AlertTriangle
 } from 'lucide-react';
-import { useState, ChangeEvent, ReactNode } from 'react';
+import { useState, ChangeEvent, ReactNode, memo, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 
 const MOOD_ICONS: Record<string, ReactNode> = {
@@ -52,7 +52,10 @@ interface SidebarProps {
   onImport: (e: ChangeEvent<HTMLInputElement>) => void;
   onClearAllData?: (options?: { deleteCloudBackup?: boolean }) => void;
   onConnectDrive?: () => void;
+  onManualSync?: () => void;
   driveConnected?: boolean;
+  isSyncingBackground?: boolean;
+  syncError?: boolean;
   currentUser?: any;
   appPassword?: string | null;
   onUpdateAppPassword?: (pwd: string | null) => void;
@@ -66,7 +69,7 @@ interface SidebarProps {
   onToggleSettings?: (show: boolean) => void;
 }
 
-export default function Sidebar({
+const Sidebar = memo(function Sidebar({
   entries,
   activeEntryId,
   onSelectEntry,
@@ -85,7 +88,10 @@ export default function Sidebar({
   onImport,
   onClearAllData,
   onConnectDrive,
+  onManualSync,
   driveConnected,
+  isSyncingBackground,
+  syncError,
   currentUser,
   appPassword,
   onUpdateAppPassword,
@@ -186,7 +192,7 @@ export default function Sidebar({
   };
 
   // Filter entries based on search & active tag
-  const filteredEntries = entries.filter((entry) => {
+  const filteredEntries = useMemo(() => entries.filter((entry) => {
     const combinedContent = `${entry.title} ${entry.content}`;
     const matchesSearch = fuzzyMatch(combinedContent, searchQuery);
     
@@ -194,14 +200,14 @@ export default function Sidebar({
     const matchesFav = !showFavoritesOnly || entry.isFavorite;
 
     return matchesSearch && matchesTag && matchesFav;
-  });
+  }), [entries, searchQuery, selectedTag, showFavoritesOnly]);
 
-  const sortedEntries = [...filteredEntries].sort((a, b) => b.createdAt - a.createdAt);
+  const sortedEntries = useMemo(() => [...filteredEntries].sort((a, b) => b.createdAt - a.createdAt), [filteredEntries]);
 
   // Suggested tags are strictly extracted from user-made entry tags only!
-  const displayTags = Array.from(new Set(entries.flatMap(e => e.tags || [])))
+  const displayTags = useMemo(() => Array.from(new Set<string>(entries.flatMap(e => e.tags || [])))
     .map(t => t.trim())
-    .filter(Boolean);
+    .filter(Boolean), [entries]);
 
   return (
     <div 
@@ -241,7 +247,7 @@ export default function Sidebar({
             <div className="relative">
               <button
                 onClick={() => setShowAccountDropdown(!showAccountDropdown)}
-                className="w-9 h-9 rounded-full overflow-hidden flex items-center justify-center transition-all bg-black/[0.03] dark:bg-white/[0.03] hover:bg-black/[0.06] dark:hover:bg-white/[0.06] border border-black/10 dark:border-white/10 cursor-pointer interactive-target-44"
+                className="w-9 h-9 rounded-full overflow-hidden relative flex items-center justify-center transition-colors duration-200 bg-black/[0.03] dark:bg-white/[0.03] hover:bg-black/[0.06] dark:hover:bg-white/[0.06] cursor-pointer interactive-target-44 border border-black/10 dark:border-white/10"
                 title="Google Account & Cloud Backup"
                 aria-label="Google Account & Cloud Backup"
               >
@@ -262,6 +268,20 @@ export default function Sidebar({
                   <User className="w-4 h-4 opacity-60" />
                 )}
               </button>
+
+              {/* Status Indicator Dot */}
+              {driveConnected && (
+                <div 
+                  className={`absolute -top-0.5 -right-0.5 w-[14px] h-[14px] rounded-full border-[2.5px] border-white dark:border-[#1E1E1E] z-10 transition-colors duration-300 ${
+                    syncError 
+                      ? 'bg-rose-500' 
+                      : isSyncingBackground 
+                        ? 'bg-amber-400 animate-pulse' 
+                        : 'bg-emerald-500'
+                  }`}
+                  title={syncError ? "Sync Error" : isSyncingBackground ? "Syncing..." : "Synced"}
+                />
+              )}
 
               <AnimatePresence>
                 {showAccountDropdown && (
@@ -301,13 +321,33 @@ export default function Sidebar({
                             <span className="opacity-60 text-[11px] font-medium break-all">{currentUser.email}</span>
                           </div>
                           
-                          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold text-[10px] tracking-wide uppercase mt-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                            Automatic Backup Active
+                          <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full ${isSyncingBackground ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'} font-bold text-[10px] tracking-wide uppercase mt-1`}>
+                            {isSyncingBackground ? (
+                              <>
+                                <RefreshCw className="w-3 h-3 animate-spin" />
+                                Syncing to Cloud...
+                              </>
+                            ) : (
+                              <>
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                                Auto-Sync Active
+                              </>
+                            )}
                           </div>
                           
                           <div className="w-full border-t my-2" style={{ borderColor: theme.surfaceBorder }} />
                           
+                          <button
+                            onClick={() => {
+                              setShowAccountDropdown(false);
+                              onManualSync?.();
+                            }}
+                            className="w-full py-3 px-4 rounded-xl font-bold tracking-wide transition-all bg-blue-600 hover:bg-blue-700 active:scale-95 text-white cursor-pointer shadow-sm text-center mb-1 flex items-center justify-center gap-2"
+                          >
+                            <RefreshCw className="w-4 h-4" />
+                            Force Manual Sync
+                          </button>
+
                           <button
                             onClick={() => {
                               setShowAccountDropdown(false);
@@ -1107,4 +1147,6 @@ export default function Sidebar({
       </motion.button>
     </div>
   );
-}
+});
+
+export default Sidebar;

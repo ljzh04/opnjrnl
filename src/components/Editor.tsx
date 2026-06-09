@@ -1,7 +1,7 @@
 import { JournalEntry, MinimalTheme } from '../types';
 import { format } from 'date-fns';
 import { MOOD_SCALE } from '../themeData';
-import { useEffect, useLayoutEffect, useState, useRef, KeyboardEvent, ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useState, useRef, KeyboardEvent, ReactNode, memo, useMemo } from 'react';
 import { 
   Heart, 
   Trash2, 
@@ -35,10 +35,10 @@ interface EditorProps {
   onUpdate: (id: string, updates: Partial<JournalEntry>) => void;
   onDelete: (id: string) => void;
   theme: MinimalTheme;
-  entries: JournalEntry[];
+  allUserTags: string[];
 }
 
-export default function Editor({ entry, onUpdate, onDelete, theme, entries }: EditorProps) {
+const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserTags }: EditorProps) {
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [newTagInput, setNewTagInput] = useState('');
@@ -211,17 +211,14 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
     }
   };
 
-  const wordsCount = content.trim() === '' ? 0 : content.trim().split(/\s+/).length;
+  const wordsCount = useMemo(() => {
+    return content.trim() === '' ? 0 : content.trim().split(/\s+/).length;
+  }, [content]);
 
   // Extract all unique tags historically typed by user, excluding those on the active entry
-  const userTags = Array.from(
-    new Set(
-      entries
-        .flatMap((e) => e.tags || [])
-        .map((tag) => tag.trim())
-        .filter(Boolean)
-    )
-  ).filter((tag) => entry && !entry.tags.includes(tag));
+  const availableTags = useMemo(() => {
+    return allUserTags.filter((tag) => entry && !entry.tags.includes(tag));
+  }, [allUserTags, entry]);
 
   if (!entry) {
     return (
@@ -410,10 +407,10 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
       </AnimatePresence>
 
       {/* Editor Canvas */}
-      <div className="min-h-full pb-4 md:pb-6">
+      <article className="min-h-full pb-4 md:pb-6">
         <div className="w-full max-w-2xl mx-auto px-6 pt-6 md:pt-10 flex flex-col">
           
-          <div className="shrink-0 flex flex-col">
+          <header className="shrink-0 flex flex-col">
             {/* Action Bar (Replaces Top Tool Shelf) */}
             <div className="flex justify-end items-center mb-6 min-h-[36px]">
             {showDeleteConfirm ? (
@@ -482,7 +479,7 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Untitled page"
-            className="text-3xl md:text-4xl font-serif text-zinc-900 border-none outline-none bg-transparent resize-none focus:ring-0 leading-snug block w-full py-0 font-semibold placeholder:text-zinc-300 dark:placeholder:text-zinc-600 mb-4 md:mb-5 overflow-hidden"
+            className="text-3xl md:text-4xl font-serif text-zinc-900 border-none outline-none bg-transparent resize-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 leading-snug block w-full py-0 font-semibold placeholder:text-zinc-300 dark:placeholder:text-zinc-600 mb-4 md:mb-5 overflow-hidden"
             style={{ color: theme.textPrimary }}
             rows={1}
           />
@@ -592,7 +589,7 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
               </div>
               
                 {/* Suggestions drawn entirely from user-made tags in other entries! */}
-                {showTagAdder && userTags.length > 0 && (
+                {showTagAdder && availableTags.length > 0 && (
                   <div 
                     className="absolute z-10 top-full left-0 mt-2 flex max-w-[200px] flex-wrap gap-1 p-2 rounded border shadow-xl text-[10px]" 
                     style={{ 
@@ -602,7 +599,7 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
                     }}
                   >
                     <span className="opacity-40 w-full mb-0.5 lowercase font-mono">Suggestions:</span>
-                    {userTags.map((uTag) => (
+                    {availableTags.map((uTag) => (
                       <button
                         key={uTag}
                         onClick={() => handleAddTag(uTag)}
@@ -621,7 +618,7 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
             </div>
 
             <hr className="mb-4 border-t" style={{ borderColor: theme.surfaceBorder }} />
-          </div>
+          </header>
 
           {/* Composing Textarea Area */}
           <textarea
@@ -629,11 +626,13 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
             value={content}
             onChange={(e) => setContent(e.target.value)}
             placeholder="Begin writing..."
-            className="w-full max-w-[65ch] prose-measure mx-auto text-base md:text-lg font-serif leading-[1.8] border-none outline-none bg-transparent resize-none focus:ring-0 py-2 min-h-[50vh] overflow-hidden"
+            className="w-full max-w-[65ch] prose-measure mx-auto text-base md:text-lg font-serif leading-[1.8] border-none outline-none bg-transparent resize-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 py-2 min-h-[50vh] overflow-hidden"
             style={{ color: theme.textPrimary }}
           />
         </div>
-      </div>
+      </article>
     </div>
   );
-}
+});
+
+export default Editor;
