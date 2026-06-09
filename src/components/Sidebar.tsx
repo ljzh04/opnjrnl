@@ -272,13 +272,14 @@ const Sidebar = memo(function Sidebar({
               {/* Status Indicator Dot */}
               {driveConnected && (
                 <div 
-                  className={`absolute -top-0.5 -right-0.5 w-[14px] h-[14px] rounded-full border-[2.5px] border-white dark:border-[#1E1E1E] z-10 transition-colors duration-300 ${
+                  className={`absolute -bottom-0.5 -right-0.5 w-[14px] h-[14px] rounded-full border-[2.5px] border-solid z-10 transition-colors duration-300 ${
                     syncError 
                       ? 'bg-rose-500' 
                       : isSyncingBackground 
                         ? 'bg-amber-400 animate-pulse' 
                         : 'bg-emerald-500'
                   }`}
+                  style={{ borderColor: theme.surface }}
                   title={syncError ? "Sync Error" : isSyncingBackground ? "Syncing..." : "Synced"}
                 />
               )}
