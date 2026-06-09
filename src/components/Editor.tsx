@@ -1,7 +1,7 @@
 import { JournalEntry, MinimalTheme } from '../types';
 import { format } from 'date-fns';
 import { MOOD_SCALE } from '../themeData';
-import { useEffect, useState, useRef, KeyboardEvent, ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useState, useRef, KeyboardEvent, ReactNode } from 'react';
 import { 
   Heart, 
   Trash2, 
@@ -78,14 +78,39 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [title, content]);
 
-  // Auto-resize title textarea with a defensive maximum size constraint
-  useEffect(() => {
-    if (titleRef.current) {
-      titleRef.current.style.height = 'auto';
-      const calculatedHeight = Math.min(titleRef.current.scrollHeight, 140);
-      titleRef.current.style.height = calculatedHeight + 'px';
+  const resizeTextarea = (el: HTMLTextAreaElement | null) => {
+    if (!el) return;
+    
+    // Preserve scroll position of the main scrolling container
+    const scrollContainer = el.closest('.overflow-y-auto') as HTMLElement;
+    const scrollPos = scrollContainer ? scrollContainer.scrollTop : 0;
+
+    el.style.height = '0px';
+    const newHeight = el.scrollHeight;
+    el.style.height = `${newHeight}px`;
+
+    if (scrollContainer) {
+      scrollContainer.scrollTop = scrollPos;
     }
+  };
+
+  // Auto-resize textareas to expand with content
+  useLayoutEffect(() => {
+    resizeTextarea(titleRef.current);
   }, [title]);
+
+  useLayoutEffect(() => {
+    resizeTextarea(contentRef.current);
+  }, [content]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      resizeTextarea(titleRef.current);
+      resizeTextarea(contentRef.current);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   const toggleFavorite = () => {
     if (!entry) return;
@@ -365,7 +390,7 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
 
   return (
     <div 
-      className="flex-1 flex flex-col h-full overflow-hidden relative selection:bg-zinc-200 transition-colors duration-300"
+      className="flex-1 overflow-y-auto h-full relative selection:bg-zinc-200 transition-colors duration-300 scrollbar-thin md:scrollbar-thin"
       style={{ backgroundColor: theme.surface, color: theme.textPrimary }}
     >
       {/* Dynamic Tiny Alert Toast */}
@@ -385,10 +410,8 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
       </AnimatePresence>
 
       {/* Editor Canvas */}
-      <div 
-        className="flex-1 flex flex-col overflow-hidden pb-4 md:pb-6"
-      >
-        <div className="w-full max-w-2xl mx-auto px-6 pt-6 md:pt-10 flex-1 flex flex-col overflow-hidden">
+      <div className="min-h-full pb-4 md:pb-6">
+        <div className="w-full max-w-2xl mx-auto px-6 pt-6 md:pt-10 flex flex-col">
           
           <div className="shrink-0 flex flex-col">
             {/* Action Bar (Replaces Top Tool Shelf) */}
@@ -459,7 +482,7 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Untitled page"
-            className="text-3xl md:text-4xl font-serif text-zinc-900 border-none outline-none bg-transparent resize-none focus:ring-0 leading-snug block w-full py-0 font-semibold placeholder:text-zinc-300 dark:placeholder:text-zinc-600 mb-4 md:mb-5 max-h-[140px] overflow-y-auto scrollbar-none"
+            className="text-3xl md:text-4xl font-serif text-zinc-900 border-none outline-none bg-transparent resize-none focus:ring-0 leading-snug block w-full py-0 font-semibold placeholder:text-zinc-300 dark:placeholder:text-zinc-600 mb-4 md:mb-5 overflow-hidden"
             style={{ color: theme.textPrimary }}
             rows={1}
           />
@@ -606,7 +629,7 @@ export default function Editor({ entry, onUpdate, onDelete, theme, entries }: Ed
             value={content}
             onChange={(e) => setContent(e.target.value)}
             placeholder="Begin writing..."
-            className="w-full flex-1 max-w-[65ch] prose-measure mx-auto text-base md:text-lg font-serif leading-[1.8] border-none outline-none bg-transparent resize-none focus:ring-0 py-2 min-h-0 overflow-y-auto scrollbar-thin md:scrollbar-thin"
+            className="w-full max-w-[65ch] prose-measure mx-auto text-base md:text-lg font-serif leading-[1.8] border-none outline-none bg-transparent resize-none focus:ring-0 py-2 min-h-[50vh] overflow-hidden"
             style={{ color: theme.textPrimary }}
           />
         </div>
