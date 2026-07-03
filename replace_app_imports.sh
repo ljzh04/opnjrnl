@@ -1,0 +1,2 @@
+#!/bin/bash
+sed -i 's/import { getSavedDirectoryHandle, promptDirectorySelection, loadEntriesFromDirectory, saveEntryToDirectory, deleteEntryFromDirectory } from '\''.\/lib\/fsStorage'\'';/import { getSavedDirectoryHandleInfo, requestDirectoryPermission, promptDirectorySelection, loadEntriesFromDirectory, saveEntryToDirectory, deleteEntryFromDirectory, disconnectDirectory } from '\''.\/lib\/fsStorage'\'';/g' src/App.tsx

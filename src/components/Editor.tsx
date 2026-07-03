@@ -18,9 +18,24 @@ import {
   Sun,
   Shield,
   Lock,
-  Info
+  Info,
+  Paperclip,
+  Link2,
+  Bold,
+  Italic,
+  Underline,
+  List,
+  Type,
+  Image as ImageIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+
+import { useEditor, EditorContent } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
+import TipTapUnderline from '@tiptap/extension-underline';
+import TipTapLink from '@tiptap/extension-link';
+import TipTapImage from '@tiptap/extension-image';
+import Placeholder from '@tiptap/extension-placeholder';
 
 const MOOD_ICONS: Record<string, ReactNode> = {
   terrible: <CloudRain className="w-5 h-5" />,
@@ -45,9 +60,31 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
   const [showTagAdder, setShowTagAdder] = useState(false);
   const [showToast, setShowToast] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  
 
   const titleRef = useRef<HTMLTextAreaElement>(null);
-  const contentRef = useRef<HTMLTextAreaElement>(null);
+
+  const editor = useEditor({
+    extensions: [
+      StarterKit,
+      TipTapUnderline,
+      TipTapLink.configure({ openOnClick: false }),
+      TipTapImage,
+      Placeholder.configure({ placeholder: "Begin writing..." }),
+    ],
+    content: entry?.content || '',
+    onUpdate: ({ editor }) => {
+      const html = editor.getHTML();
+      setContent(html);
+    },
+    editorProps: {
+      attributes: {
+        class: 'prose prose-sm md:prose-base dark:prose-invert font-serif leading-[1.8] focus:outline-none min-h-[50vh] w-full max-w-[65ch] mx-auto',
+      },
+    },
+  });
+
+  
 
   // Sync state when active entry changes
   useEffect(() => {
@@ -55,12 +92,18 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
       setTitle(entry.title);
       setContent(entry.content);
       setShowDeleteConfirm(false);
+      if (editor && editor.getHTML() !== entry.content) {
+        editor.commands.setContent(entry.content);
+      }
     } else {
       setTitle('');
       setContent('');
       setShowDeleteConfirm(false);
+      if (editor) {
+        editor.commands.setContent('');
+      }
     }
-  }, [entry?.id]);
+  }, [entry?.id, editor]);
 
   // Debounced auto-save
   useEffect(() => {
@@ -95,18 +138,10 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
   };
 
   // Auto-resize textareas to expand with content
-  useLayoutEffect(() => {
-    resizeTextarea(titleRef.current);
-  }, [title]);
-
-  useLayoutEffect(() => {
-    resizeTextarea(contentRef.current);
-  }, [content]);
 
   useEffect(() => {
     const handleResize = () => {
       resizeTextarea(titleRef.current);
-      resizeTextarea(contentRef.current);
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
@@ -144,6 +179,36 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
     if (!entry) return;
     const updatedTags = entry.tags.filter(t => t !== tagToRemove);
     onUpdate(entry.id, { tags: updatedTags });
+  };
+
+  const applyFormatting = (format: string, url?: string) => {
+    if (!editor) return;
+    switch (format) {
+      case "bold":
+        editor.chain().focus().toggleBold().run();
+        break;
+      case "italic":
+        editor.chain().focus().toggleItalic().run();
+        break;
+      case "underline":
+        editor.chain().focus().toggleUnderline().run();
+        break;
+      case "bulletList":
+        editor.chain().focus().toggleBulletList().run();
+        break;
+      case "link":
+        if (url) {
+          editor.chain().focus().setLink({ href: url }).run();
+        } else {
+          editor.chain().focus().unsetLink().run();
+        }
+        break;
+      case "image":
+        if (url) {
+          editor.chain().focus().setImage({ src: url }).run();
+        }
+        break;
+    }
   };
 
   const triggerToast = (msg: string) => {
@@ -350,35 +415,7 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
             </div>
           </div>
 
-          {/* Footer Navigation / Privacy Policy compliance */}
-          <div 
-            className="pt-6 border-t flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 text-[11px] font-sans"
-            style={{ borderColor: theme.surfaceBorder, color: theme.textSecondary }}
-          >
-            <div className="flex flex-wrap items-center gap-3">
-              <a 
-                href="privacy.html" 
-                target="_blank" 
-                rel="noopener noreferrer" 
-                className="hover:underline font-semibold"
-                style={{ color: theme.accent }}
-              >
-                Privacy policy
-              </a>
-              <span className="opacity-30">|</span>
-              <a 
-                href="https://ljzh04.github.io/opnjrnl/" 
-                target="_blank" 
-                rel="noopener noreferrer" 
-                className="hover:underline font-medium opacity-80"
-              >
-                Homepage (Verified Owner Domain)
-              </a>
-            </div>
-            <div className="opacity-50">
-              Made with pure local confidentiality
-            </div>
-          </div>
+
           
         </div>
       </div>
@@ -516,7 +553,7 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
                       title={m.label}
                       style={{
                         backgroundColor: isSelected ? theme.accentLight : 'transparent',
-                        ringColor: isSelected ? theme.accent : 'transparent'
+                        
                       }}
                     >
                       {MOOD_ICONS[m.id]}
@@ -621,16 +658,95 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
           </header>
 
           {/* Composing Textarea Area */}
-          <textarea
-            ref={contentRef}
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            placeholder="Begin writing..."
-            className="w-full max-w-[65ch] prose-measure mx-auto text-base md:text-lg font-serif leading-[1.8] border-none outline-none bg-transparent resize-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 py-2 min-h-[50vh] overflow-hidden"
-            style={{ color: theme.textPrimary }}
-          />
+          <div className="w-full max-w-[65ch] prose-measure mx-auto py-2 min-h-[50vh]">
+            <EditorContent 
+              editor={editor}
+              style={{ color: theme.textPrimary }}
+            />
+          </div>
         </div>
       </article>
+
+      {/* Sticky Utility Ribbon (Gmail style) */}
+      <div className="sticky bottom-0 left-0 right-0 w-full flex justify-center pb-4 md:pb-6 pointer-events-none z-10 px-4">
+        <div 
+          className="pointer-events-auto flex items-center gap-1.5 px-3 py-2 rounded-full border shadow-lg backdrop-blur-md transition-colors"
+          style={{ 
+            backgroundColor: theme.surface,
+            borderColor: theme.surfaceBorder 
+          }}
+        >
+          {/* Format Section */}
+
+          <button 
+            className="p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
+            style={{ color: theme.textPrimary }}
+            title="Bold"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => applyFormatting('bold')}
+          >
+            <Bold className="w-4 h-4" />
+          </button>
+          <button 
+            className="p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
+            style={{ color: theme.textPrimary }}
+            title="Italic"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => applyFormatting('italic')}
+          >
+            <Italic className="w-4 h-4" />
+          </button>
+          <button 
+            className="p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
+            style={{ color: theme.textPrimary }}
+            title="Underline"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => applyFormatting('underline')}
+          >
+            <Underline className="w-4 h-4" />
+          </button>
+          <button 
+            className="p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
+            style={{ color: theme.textPrimary }}
+            title="Bulleted list"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => applyFormatting('bulletList')}
+          >
+            <List className="w-4 h-4" />
+          </button>
+          
+          <div className="w-px h-5 mx-1" style={{ backgroundColor: theme.surfaceBorder }}></div>
+
+          {/* Attachments & Links Section */}
+          <button 
+            className="p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
+            style={{ color: theme.textPrimary }}
+            title="Attach files"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => triggerToast("File attachments coming soon!")}
+          >
+            <Paperclip className="w-4 h-4" />
+          </button>
+          <button 
+            className="p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
+            style={{ color: theme.textPrimary }}
+            title="Insert link"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => { const url = window.prompt('URL'); if (url) applyFormatting('link', url); }}
+          >
+            <Link2 className="w-4 h-4" />
+          </button>
+          <button 
+            className="p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
+            style={{ color: theme.textPrimary }}
+            title="Insert image"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => { const url = window.prompt('Image URL'); if (url) applyFormatting('image', url); }}
+          >
+            <ImageIcon className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
     </div>
   );
 });

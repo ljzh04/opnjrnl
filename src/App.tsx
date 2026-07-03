@@ -7,6 +7,7 @@ import { useState, useEffect, ChangeEvent, useRef, useCallback, useMemo } from '
 import { JournalEntry, MinimalThemeId } from './types';
 import { MINIMAL_THEMES } from './themeData';
 import Sidebar from './components/Sidebar';
+import { getSavedDirectoryHandleInfo, requestDirectoryPermission, promptDirectorySelection, loadEntriesFromDirectory, saveEntryToDirectory, deleteEntryFromDirectory, disconnectDirectory } from './lib/fsStorage';
 import Editor from './components/Editor';
 import { v4 as uuidv4 } from 'uuid';
 import { ArrowLeft, RefreshCw, ArrowUpFromLine, ArrowDownToLine, Cloud, Info, AlertTriangle } from 'lucide-react';
@@ -64,6 +65,7 @@ const triggerNotification = async (title: string, body: string) => {
 
 export default function App() {
   const [entries, setEntries] = useState<JournalEntry[]>([]);
+  const [dirHandle, setDirHandle] = useState<any>(null);
   const [themeId, setThemeId] = useState<MinimalThemeId>('paper');
   const [isLoaded, setIsLoaded] = useState(false);
   const [activeEntryId, setActiveEntryId] = useState<string | null>(null);
@@ -117,6 +119,7 @@ export default function App() {
     cloudCount: number;
     cloudEntries: any[];
     activeFileId: string | null;
+    isManualSync?: boolean;
   } | null>(null);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -170,10 +173,25 @@ export default function App() {
       get<MinimalThemeId>(THEME_STORAGE_KEY),
       get<string | null>(APP_PASSWORD_KEY),
       get<string | null>(APP_SYSLOCK_KEY),
-      get<{ notificationsEnabled: boolean, notificationTime: string }>(APP_SETTINGS_KEY)
-    ]).then(([storedEntries, storedThemeId, storedPassword, storedSyslock, storedSettings]) => {
-      if (storedEntries) {
-        // Ensure all historical entries have a tags array to avoid runtime crashes
+      get<{ notificationsEnabled: boolean, notificationTime: string }>(APP_SETTINGS_KEY),
+      getSavedDirectoryHandleInfo()
+    ]).then(async ([storedEntries, storedThemeId, storedPassword, storedSyslock, storedSettings, dirHandleInfo]) => {
+      if (dirHandleInfo) {
+        setDirHandle(dirHandleInfo.handle);
+        if (!dirHandleInfo.requiresPermission) {
+          const dirEntries = await loadEntriesFromDirectory(dirHandleInfo.handle);
+          setEntries(dirEntries);
+        } else {
+          // Requires permission, let UI prompt, load IDB fallback for now
+          if (storedEntries) {
+            const polished = storedEntries.map(entry => ({
+              ...entry,
+              tags: entry.tags || []
+            }));
+            setEntries(polished);
+          }
+        }
+      } else if (storedEntries) {
         const polished = storedEntries.map(entry => ({
           ...entry,
           tags: entry.tags || []
@@ -197,9 +215,10 @@ export default function App() {
       }
       setIsLoaded(true);
     }).catch((err) => {
-      console.error("IndexedDB load error:", err);
-      setIsLoaded(true); // Proceed anyway with default values
+      console.error("Storage load error:", err);
+      setIsLoaded(true);
     });
+
 
     // Request notification permission on load just in case (if we want to use them)
     if ("Notification" in window) {
@@ -208,9 +227,9 @@ export default function App() {
 
     // Initialize Auth
     initAuth(
-      (user, _token) => {
-        setDriveConnected(true);
+      (user, token) => {
         setCurrentUser(user);
+        setDriveConnected(!!token);
       },
       () => {
         setDriveConnected(false);
@@ -634,23 +653,31 @@ export default function App() {
     clearUndoState();
     const newEntry: JournalEntry = {
       id: uuidv4(),
-      title: '',
-      content: '',
+      title: "",
+      content: "",
       createdAt: Date.now(),
       updatedAt: Date.now(),
       tags: [],
     };
-    setEntries([newEntry, ...entries]);
+    setEntries(current => {
+      if (dirHandle) saveEntryToDirectory(dirHandle, newEntry);
+      return [newEntry, ...current];
+    });
     setActiveEntryId(newEntry.id);
   };
 
   const handleUpdateEntry = useCallback((id: string, updates: Partial<JournalEntry>) => {
-    setEntries(current =>
-      current.map(entry =>
+    setEntries(current => {
+      const newEntries = current.map(entry =>
         entry.id === id ? { ...entry, ...updates } : entry
-      )
-    );
-  }, []);
+      );
+      if (dirHandle) {
+        const updatedEntry = newEntries.find(e => e.id === id);
+        if (updatedEntry) saveEntryToDirectory(dirHandle, updatedEntry);
+      }
+      return newEntries;
+    });
+  }, [dirHandle]);
 
   const handleDeleteEntry = useCallback((id: string) => {
     setEntries(current => {
@@ -660,13 +687,16 @@ export default function App() {
         if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
         undoTimeoutRef.current = setTimeout(() => {
           setDeletedEntryState(null);
-        }, 10000); // UI lasts for 10 seconds
+        }, 10000);
+      }
+      if (dirHandle) {
+        deleteEntryFromDirectory(dirHandle, id);
       }
       return current.filter(entry => entry.id !== id);
     });
 
     setActiveEntryId(current => (current === id ? null : current));
-  }, []);
+  }, [dirHandle]);
 
   const handleUndoDelete = (e?: any) => {
     if (e) {
@@ -674,7 +704,10 @@ export default function App() {
       e.stopPropagation();
     }
     if (deletedEntryState) {
-      setEntries(current => [deletedEntryState.entry, ...current].sort((a, b) => b.createdAt - a.createdAt));
+      setEntries(current => {
+        if (dirHandle) saveEntryToDirectory(dirHandle, deletedEntryState.entry);
+        return [deletedEntryState.entry, ...current].sort((a, b) => b.createdAt - a.createdAt);
+      });
       clearUndoState();
     }
   };
@@ -941,6 +974,25 @@ export default function App() {
         className={`transition-all duration-300 ease-in-out shrink-0 h-full flex w-full md:w-[350px] lg:w-[390px]`}
       >
         <Sidebar
+          vaultName={dirHandle ? dirHandle.name : null}
+          onSelectVault={async () => {
+            const handle = await promptDirectorySelection();
+            if (handle) {
+              setDirHandle(handle);
+              const dirEntries = await loadEntriesFromDirectory(handle);
+              if (dirEntries.length > 0) {
+                setEntries(dirEntries);
+                alert(`Loaded ${dirEntries.length} entries from vault.`);
+              } else {
+                alert(`Vault connected. Found 0 entries.`);
+              }
+            }
+          }}
+          onDisconnectVault={async () => {
+            await disconnectDirectory();
+            setDirHandle(null);
+            alert("Disconnected local vault.");
+          }}
           entries={entries}
           activeEntryId={activeEntryId}
           showSettings={showSettings}

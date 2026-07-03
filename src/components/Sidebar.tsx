@@ -11,6 +11,7 @@ import {
   Settings,
   FileDown,
   FileUp,
+  Folder,
   Smile,
   Meh,
   Frown,
@@ -64,6 +65,9 @@ interface SidebarProps {
   notificationsEnabled?: boolean;
   notificationTime?: string;
   onUpdateNotifications?: (enabled: boolean, time: string) => void;
+  vaultName?: string | null;
+  onSelectVault?: () => void;
+  onDisconnectVault?: () => void;
   onTestNotification?: () => void;
   showSettings?: boolean;
   onToggleSettings?: (show: boolean) => void;
@@ -100,6 +104,9 @@ const Sidebar = memo(function Sidebar({
   notificationsEnabled,
   notificationTime,
   onUpdateNotifications,
+  vaultName,
+  onSelectVault,
+  onDisconnectVault,
   onTestNotification,
   showSettings,
   onToggleSettings
@@ -209,6 +216,11 @@ const Sidebar = memo(function Sidebar({
     .map(t => t.trim())
     .filter(Boolean), [entries]);
 
+  const stripMarkdown = (str: string) => {
+    if (!str) return "Start taking records...";
+    return str.replace(/<[^>]*>?/gm, "").trim();
+  };
+
   return (
     <div 
       className="w-full h-full flex flex-col overflow-hidden relative transition-colors duration-300 border-r"
@@ -251,7 +263,7 @@ const Sidebar = memo(function Sidebar({
                 title="Google Account & Cloud Backup"
                 aria-label="Google Account & Cloud Backup"
               >
-                {driveConnected && currentUser ? (
+                {currentUser ? (
                   currentUser.photoURL ? (
                     <img 
                       src={currentUser.photoURL} 
@@ -270,17 +282,19 @@ const Sidebar = memo(function Sidebar({
               </button>
 
               {/* Status Indicator Dot */}
-              {driveConnected && (
+              {currentUser && (
                 <div 
                   className={`absolute -bottom-0.5 -right-0.5 w-[14px] h-[14px] rounded-full border-[2.5px] border-solid z-10 transition-colors duration-300 ${
-                    syncError 
-                      ? 'bg-rose-500' 
-                      : isSyncingBackground 
-                        ? 'bg-amber-400 animate-pulse' 
-                        : 'bg-emerald-500'
+                    !driveConnected
+                      ? 'bg-amber-500' 
+                      : syncError 
+                        ? 'bg-rose-500' 
+                        : isSyncingBackground 
+                          ? 'bg-blue-400 animate-pulse' 
+                          : 'bg-emerald-500'
                   }`}
                   style={{ borderColor: theme.surface }}
-                  title={syncError ? "Sync Error" : isSyncingBackground ? "Syncing..." : "Synced"}
+                  title={!driveConnected ? "Session Expired" : syncError ? "Sync Error" : isSyncingBackground ? "Syncing..." : "Synced"}
                 />
               )}
 
@@ -302,7 +316,7 @@ const Sidebar = memo(function Sidebar({
                         color: theme.textPrimary
                       }}
                     >
-                      {driveConnected && currentUser ? (
+                      {currentUser ? (
                         <div className="flex flex-col items-center gap-3 text-center pb-1">
                           {currentUser.photoURL ? (
                             <img 
@@ -322,8 +336,13 @@ const Sidebar = memo(function Sidebar({
                             <span className="opacity-60 text-[11px] font-medium break-all">{currentUser.email}</span>
                           </div>
                           
-                          <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full ${isSyncingBackground ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'} font-bold text-[10px] tracking-wide uppercase mt-1`}>
-                            {isSyncingBackground ? (
+                          <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full ${!driveConnected ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' : isSyncingBackground ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'} font-bold text-[10px] tracking-wide uppercase mt-1`}>
+                            {!driveConnected ? (
+                              <>
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                                Session Expired
+                              </>
+                            ) : isSyncingBackground ? (
                               <>
                                 <RefreshCw className="w-3 h-3 animate-spin" />
                                 Syncing to Cloud...
@@ -338,25 +357,46 @@ const Sidebar = memo(function Sidebar({
                           
                           <div className="w-full border-t my-2" style={{ borderColor: theme.surfaceBorder }} />
                           
-                          <button
-                            onClick={() => {
-                              setShowAccountDropdown(false);
-                              onManualSync?.();
-                            }}
-                            className="w-full py-3 px-4 rounded-xl font-bold tracking-wide transition-all bg-blue-600 hover:bg-blue-700 active:scale-95 text-white cursor-pointer shadow-sm text-center mb-1 flex items-center justify-center gap-2"
-                          >
-                            <RefreshCw className="w-4 h-4" />
-                            Force Manual Sync
-                          </button>
+                          {driveConnected ? (
+                            <button
+                              onClick={() => {
+                                setShowAccountDropdown(false);
+                                onManualSync?.();
+                              }}
+                              className="w-full py-3 px-4 rounded-xl font-bold tracking-wide transition-all bg-blue-600 hover:bg-blue-700 active:scale-95 text-white cursor-pointer shadow-sm text-center mb-1 flex items-center justify-center gap-2"
+                            >
+                              <RefreshCw className="w-4 h-4" />
+                              Force Manual Sync
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                setShowAccountDropdown(false);
+                                onConnectDrive?.();
+                              }}
+                              className="w-full py-3 px-4 rounded-xl font-bold tracking-wide transition-all bg-amber-500 hover:bg-amber-600 active:scale-95 text-white cursor-pointer shadow-sm text-center mb-1 flex items-center justify-center gap-2"
+                            >
+                              <RefreshCw className="w-4 h-4" />
+                              Refresh Session
+                            </button>
+                          )}
 
                           <button
                             onClick={() => {
                               setShowAccountDropdown(false);
-                              onConnectDrive?.();
+                              if (!driveConnected) {
+                                // If they are not connected to drive, they are just signed into firebase but the token expired. Let's sign out completely
+                                import('../lib/auth').then(({ logout }) => {
+                                  logout();
+                                  window.location.reload();
+                                });
+                              } else {
+                                onConnectDrive?.();
+                              }
                             }}
                             className="w-full py-3 px-4 rounded-xl font-bold tracking-wide transition-all bg-rose-500 hover:bg-rose-600 active:scale-95 text-white cursor-pointer shadow-sm text-center"
                           >
-                            Disconnect App Sync
+                            {driveConnected ? "Disconnect App Sync" : "Sign Out Completely"}
                           </button>
                         </div>
                       ) : (
@@ -401,7 +441,7 @@ const Sidebar = memo(function Sidebar({
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Search notes..."
-            className="w-full py-3 pl-10 pr-9 text-sm rounded-xl transition-all duration-150 outline-none border focus:border-zinc-400 interactive-target-44"
+            className="w-full py-3 pl-10 pr-9 text-sm rounded-xl transition-all duration-150 border interactive-target-44 !outline-none !shadow-none focus:!outline-none focus:!ring-0 focus:!shadow-none focus-visible:!outline-none focus-visible:!ring-0 focus-visible:!shadow-none"
             style={{ 
               backgroundColor: theme.surface, 
               color: theme.textPrimary,
@@ -721,6 +761,45 @@ const Sidebar = memo(function Sidebar({
                  </div>
                </div>
 
+              {/* Native Vault Directory Settings */}
+              <div className="flex flex-col gap-3 mt-4">
+                <div className="flex items-center gap-2 mb-1 px-1">
+                  <Folder className="w-3.5 h-3.5 opacity-60" />
+                  <span className="text-[10px] font-bold tracking-widest uppercase opacity-40">Local Vault</span>
+                </div>
+                <div 
+                  className="rounded-xl border overflow-hidden flex flex-col"
+                  style={{ borderColor: theme.surfaceBorder, backgroundColor: theme.surface }}
+                >
+                  <div className="p-4 flex flex-col gap-2 border-b" style={{ borderColor: theme.surfaceBorder }}>
+                    <span className="text-[11px] opacity-70 leading-relaxed">
+                      Store your journal directly on your device. This allows you to sync with your own services (like Syncthing or Dropbox) and prevents vendor lock-in.
+                    </span>
+                    <div className="flex items-center justify-between mt-2">
+                      <div className="flex flex-col">
+                        <span className="text-xs font-semibold">{vaultName ? `Connected: ${vaultName}` : "Not Connected"}</span>
+                      </div>
+                      {vaultName ? (
+                        <button 
+                          onClick={onDisconnectVault}
+                          className="text-[10px] uppercase font-bold tracking-wider px-3 py-1.5 rounded-full bg-rose-500/10 text-rose-500 active:scale-95 transition-transform"
+                        >
+                          Disconnect
+                        </button>
+                      ) : (
+                        <button 
+                          onClick={onSelectVault}
+                          className="text-[10px] uppercase font-bold tracking-wider px-3 py-1.5 rounded-full active:scale-95 transition-transform border"
+                          style={{ backgroundColor: theme.accent, color: theme.background, borderColor: theme.surfaceBorder }}
+                        >
+                          Select Folder
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {/* Cloud Storage Backups Disclosure & Privacy Footer */}
               <div 
                 className="rounded-xl border p-4 flex flex-col gap-2.5 text-[10px] leading-relaxed opacity-60 mt-2" 
@@ -863,7 +942,7 @@ const Sidebar = memo(function Sidebar({
                           className="text-xs line-clamp-2 leading-relaxed opacity-70 font-sans mb-3 pr-2.5"
                           style={{ color: theme.textSecondary }}
                         >
-                          {entry.content || 'Start taking records...'}
+                          {stripMarkdown(entry.content)}
                         </p>
 
                         {/* Metadata block OR Interactive Delete Confirmation */}
@@ -1129,6 +1208,13 @@ const Sidebar = memo(function Sidebar({
           </div>
         )}
       </AnimatePresence>
+
+      {/* Floating Privacy Link */}
+      <div className="absolute bottom-7 left-6 z-35 flex flex-col gap-1 text-[10px] font-sans font-medium opacity-40 hover:opacity-100 transition-opacity" style={{ color: theme.textSecondary }}>
+        <a href="privacy.html" target="_blank" rel="noopener noreferrer" className="hover:underline uppercase tracking-widest">
+          Privacy Policy
+        </a>
+      </div>
 
       {/* Floating Action Button */}
       <motion.button 
