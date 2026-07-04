@@ -1,8 +1,8 @@
-import { JournalEntry, MinimalTheme } from '../types';
+import { JournalEntry, MinimalTheme, Attachment } from '../types';
 import { format } from 'date-fns';
 import { MOOD_SCALE } from '../themeData';
 import { useEffect, useLayoutEffect, useState, useRef, KeyboardEvent, ReactNode, memo, useMemo } from 'react';
-import { 
+import {
   Heart, 
   Trash2, 
   Share2, 
@@ -26,16 +26,27 @@ import {
   Underline,
   List,
   Type,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Video as VideoIcon,
+  FileText,
+  ExternalLink,
+  Unlink,
+  Undo,
+  Redo,
+  Copy,
+  Pen,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
-import { useEditor, EditorContent } from '@tiptap/react';
+import { useEditor, EditorContent, useEditorState } from '@tiptap/react';
+import { BubbleMenu } from '@tiptap/react/menus';
 import StarterKit from '@tiptap/starter-kit';
 import TipTapUnderline from '@tiptap/extension-underline';
 import TipTapLink from '@tiptap/extension-link';
-import TipTapImage from '@tiptap/extension-image';
 import Placeholder from '@tiptap/extension-placeholder';
+import ResizableImage from '../extensions/ResizableImage';
+import ResizableVideo, { toEmbedUrl, detectVideoType } from '../extensions/ResizableVideo';
+import { openGoogleDrivePicker } from '../lib/drivePicker';
 
 const MOOD_ICONS: Record<string, ReactNode> = {
   terrible: <CloudRain className="w-5 h-5" />,
@@ -51,25 +62,91 @@ interface EditorProps {
   onDelete: (id: string) => void;
   theme: MinimalTheme;
   allUserTags: string[];
+  driveConnected: boolean;
 }
 
-const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserTags }: EditorProps) {
+function LinkBubbleContent({ editor, setLinkUrl, setShowLinkDialog }: {
+  editor: Editor;
+  setLinkUrl: (url: string) => void;
+  setShowLinkDialog: (show: boolean) => void;
+}) {
+  const href = useEditorState({
+    editor,
+    selector: (ctx) => ctx.editor.getAttributes('link').href,
+  })
+
+  return (
+    <div
+      className="flex items-center gap-1 rounded-full border shadow-lg px-3 py-1.5 backdrop-blur-md text-xs"
+      style={{ backgroundColor: '#ffffff', borderColor: '#e5e7eb' }}
+    >
+      <a
+        href={href || '#'}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="truncate max-w-[180px] font-mono text-xs underline underline-offset-2"
+        style={{ color: '#3b82f6' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {href}
+      </a>
+      <div className="w-px h-4 mx-1" style={{ backgroundColor: '#e5e7eb' }} />
+      <button
+        onClick={() => { if (href) navigator.clipboard.writeText(href) }}
+        className="p-1.5 rounded-full transition-all hover:bg-black/5 active:scale-95 cursor-pointer"
+        style={{ color: '#6b7280' }}
+        title="Copy link"
+      >
+        <Copy className="w-3.5 h-3.5" />
+      </button>
+      <button
+        onClick={() => { setLinkUrl(href || ''); setShowLinkDialog(true) }}
+        className="p-1.5 rounded-full transition-all hover:bg-black/5 active:scale-95 cursor-pointer"
+        style={{ color: '#6b7280' }}
+        title="Edit link"
+      >
+        <Pen className="w-3.5 h-3.5" />
+      </button>
+      <button
+        onClick={() => editor.chain().focus().unsetLink().run()}
+        className="p-1.5 rounded-full transition-all hover:bg-black/5 active:scale-95 cursor-pointer"
+        style={{ color: '#6b7280' }}
+        title="Remove link"
+      >
+        <Unlink className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  )
+}
+
+const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserTags, driveConnected }: EditorProps) {
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [newTagInput, setNewTagInput] = useState('');
   const [showTagAdder, setShowTagAdder] = useState(false);
   const [showToast, setShowToast] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  
+
+  const [showLinkDialog, setShowLinkDialog] = useState(false);
+  const [linkUrl, setLinkUrl] = useState('');
+  const [showImageDialog, setShowImageDialog] = useState(false);
+  const [imageUrl, setImageUrl] = useState('');
+  const [showVideoDialog, setShowVideoDialog] = useState(false);
+  const [videoUrl, setVideoUrl] = useState('');
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
 
   const titleRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const linkInputRef = useRef<HTMLInputElement>(null);
+  const linkSelectionRef = useRef<{ from: number; to: number } | null>(null);
 
   const editor = useEditor({
     extensions: [
-      StarterKit,
+      StarterKit.configure({ link: false, underline: false }),
       TipTapUnderline,
       TipTapLink.configure({ openOnClick: false }),
-      TipTapImage,
+      ResizableImage,
+      ResizableVideo,
       Placeholder.configure({ placeholder: "Begin writing..." }),
     ],
     content: entry?.content || '',
@@ -91,16 +168,18 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
     if (entry) {
       setTitle(entry.title);
       setContent(entry.content);
+      setAttachments(entry.attachments || []);
       setShowDeleteConfirm(false);
       if (editor && editor.getHTML() !== entry.content) {
-        editor.commands.setContent(entry.content);
+        queueMicrotask(() => editor.commands.setContent(entry.content));
       }
     } else {
       setTitle('');
       setContent('');
+      setAttachments([]);
       setShowDeleteConfirm(false);
       if (editor) {
-        editor.commands.setContent('');
+        queueMicrotask(() => editor.commands.setContent(''));
       }
     }
   }, [entry?.id, editor]);
@@ -113,13 +192,14 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
       onUpdate(entry.id, { 
         title, 
         content, 
+        attachments,
         updatedAt: Date.now() 
       });
     }, 600);
     
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [title, content]);
+  }, [title, content, attachments]);
 
   const resizeTextarea = (el: HTMLTextAreaElement | null) => {
     if (!el) return;
@@ -181,7 +261,7 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
     onUpdate(entry.id, { tags: updatedTags });
   };
 
-  const applyFormatting = (format: string, url?: string) => {
+  const applyFormatting = (format: string, url?: string, driveFileId?: string) => {
     if (!editor) return;
     switch (format) {
       case "bold":
@@ -198,15 +278,33 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
         break;
       case "link":
         if (url) {
-          editor.chain().focus().setLink({ href: url }).run();
+          const chain = editor.chain().focus()
+          if (linkSelectionRef.current) {
+            chain.setTextSelection(linkSelectionRef.current)
+          }
+          chain.setLink({ href: url }).run()
         } else {
-          editor.chain().focus().unsetLink().run();
+          editor.chain().focus().unsetLink().run()
         }
+        linkSelectionRef.current = null
         break;
       case "image":
-        if (url) {
-          editor.chain().focus().setImage({ src: url }).run();
+        if (url || driveFileId) {
+          editor.chain().focus().setResizableImage({ src: url || '', driveFileId }).run();
         }
+        break;
+      case "video":
+        if (url || driveFileId) {
+          const vType = driveFileId ? 'file' : detectVideoType(url || '');
+          const embedUrl = vType === 'embed' ? toEmbedUrl(url || '') : (url || '');
+          editor.chain().focus().setResizableVideo({ src: embedUrl, type: vType, driveFileId }).run();
+        }
+        break;
+      case "undo":
+        editor.chain().focus().undo().run();
+        break;
+      case "redo":
+        editor.chain().focus().redo().run();
         break;
     }
   };
@@ -664,6 +762,65 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
               style={{ color: theme.textPrimary }}
             />
           </div>
+
+          {/* Link Bubble */}
+          {editor && (
+            <BubbleMenu
+              editor={editor}
+              tippyOptions={{ duration: 150, maxWidth: 420, zIndex: 20, placement: 'bottom' }}
+              shouldShow={({ editor }) => editor.isActive('link')}
+            >
+              <LinkBubbleContent
+                editor={editor}
+                setLinkUrl={setLinkUrl}
+                setShowLinkDialog={setShowLinkDialog}
+              />
+            </BubbleMenu>
+          )}
+
+          {/* File Attachments Section */}
+          {attachments.length > 0 && (
+            <div className="w-full max-w-[65ch] mx-auto mt-6 space-y-2">
+              <span className="font-mono text-[9px] uppercase opacity-40 tracking-[0.1em]">Attachments</span>
+              <div className="flex flex-col gap-2">
+                {attachments.map((att) => (
+                  <div
+                    key={att.id}
+                    className="flex items-center gap-3 px-3 py-2.5 rounded-xl border text-xs"
+                    style={{ borderColor: theme.surfaceBorder, backgroundColor: theme.background }}
+                  >
+                    <FileText className="w-4 h-4 shrink-0 opacity-60" style={{ color: theme.textSecondary }} />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium truncate" style={{ color: theme.textPrimary }}>{att.name}</p>
+                      <p className="text-[10px] opacity-50 font-mono" style={{ color: theme.textSecondary }}>
+                        {(att.size / 1024).toFixed(1)} KB
+                      </p>
+                    </div>
+                    <a
+                      href={att.data}
+                      download={att.name}
+                      className="p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer"
+                      style={{ color: theme.textSecondary }}
+                      title="Download"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                    <button
+                      onClick={() => {
+                        const next = attachments.filter((a) => a.id !== att.id);
+                        setAttachments(next);
+                      }}
+                      className="p-2 rounded-full transition-all opacity-40 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer"
+                      style={{ color: theme.textSecondary }}
+                      title="Remove"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </article>
 
@@ -676,6 +833,28 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
             borderColor: theme.surfaceBorder 
           }}
         >
+          {/* Undo / Redo */}
+          <button 
+            className="p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
+            style={{ color: theme.textPrimary }}
+            title="Undo"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => applyFormatting('undo')}
+          >
+            <Undo className="w-4 h-4" />
+          </button>
+          <button 
+            className="p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
+            style={{ color: theme.textPrimary }}
+            title="Redo"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => applyFormatting('redo')}
+          >
+            <Redo className="w-4 h-4" />
+          </button>
+
+          <div className="w-px h-5 mx-1" style={{ backgroundColor: theme.surfaceBorder }}></div>
+
           {/* Format Section */}
 
           <button 
@@ -723,7 +902,7 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
             style={{ color: theme.textPrimary }}
             title="Attach files"
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => triggerToast("File attachments coming soon!")}
+            onClick={() => fileInputRef.current?.click()}
           >
             <Paperclip className="w-4 h-4" />
           </button>
@@ -732,7 +911,15 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
             style={{ color: theme.textPrimary }}
             title="Insert link"
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => { const url = window.prompt('URL'); if (url) applyFormatting('link', url); }}
+            onClick={() => {
+              if (!editor) return;
+              const attrs = editor.getAttributes('link');
+              setLinkUrl(attrs.href || '');
+              const { from, to } = editor.state.selection
+              linkSelectionRef.current = from !== to ? { from, to } : null
+              setShowLinkDialog(true);
+              setTimeout(() => linkInputRef.current?.focus(), 100);
+            }}
           >
             <Link2 className="w-4 h-4" />
           </button>
@@ -741,12 +928,326 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
             style={{ color: theme.textPrimary }}
             title="Insert image"
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => { const url = window.prompt('Image URL'); if (url) applyFormatting('image', url); }}
+            onClick={() => {
+              setImageUrl('');
+              setShowImageDialog(true);
+            }}
           >
             <ImageIcon className="w-4 h-4" />
           </button>
+          <button 
+            className="p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
+            style={{ color: theme.textPrimary }}
+            title="Insert video"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              setVideoUrl('');
+              setShowVideoDialog(true);
+            }}
+          >
+            <VideoIcon className="w-4 h-4" />
+          </button>
         </div>
       </div>
+
+      {/* Hidden file inputs */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          const files = Array.from(e.target.files || []);
+          files.forEach((file) => {
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+              const data = ev.target?.result as string;
+              const newAtt: Attachment = {
+                id: crypto.randomUUID(),
+                name: file.name,
+                type: file.type,
+                data,
+                size: file.size,
+                createdAt: Date.now(),
+              };
+              setAttachments((prev) => [...prev, newAtt]);
+              triggerToast(`Attached ${file.name}`);
+            };
+            reader.readAsDataURL(file);
+          });
+          e.target.value = '';
+        }}
+      />
+
+      {/* Link Dialog */}
+      <AnimatePresence>
+        {showLinkDialog && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm"
+            onClick={() => { setShowLinkDialog(false); linkSelectionRef.current = null; }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="rounded-xl border shadow-xl p-5 w-[320px]"
+              style={{ backgroundColor: theme.surface, borderColor: theme.surfaceBorder }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-sm font-semibold mb-3" style={{ color: theme.textPrimary }}>
+                {editor?.getAttributes('link').href ? 'Edit link' : 'Insert link'}
+              </h3>
+              <input
+                ref={linkInputRef}
+                type="url"
+                value={linkUrl}
+                onChange={(e) => setLinkUrl(e.target.value)}
+                placeholder="https://example.com"
+                className="w-full px-3 py-2 rounded-lg border text-sm outline-none transition-colors mb-3"
+                style={{
+                  borderColor: theme.surfaceBorder,
+                  backgroundColor: theme.background,
+                  color: theme.textPrimary,
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (linkUrl) {
+                      applyFormatting('link', linkUrl);
+                    }
+                    setShowLinkDialog(false);
+                  }
+                }}
+              />
+              <div className="flex items-center gap-2 justify-end">
+                {editor?.getAttributes('link').href && (
+                  <button
+                    onClick={() => {
+                      applyFormatting('link', undefined);
+                      setShowLinkDialog(false);
+                    }}
+                    className="px-3 py-1.5 text-xs font-semibold rounded-lg transition-all active:scale-95 cursor-pointer flex items-center gap-1.5"
+                    style={{ color: theme.textSecondary }}
+                  >
+                    <Unlink className="w-3 h-3" />
+                    Remove
+                  </button>
+                )}
+                <button
+                  onClick={() => { setShowLinkDialog(false); linkSelectionRef.current = null; }}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg transition-all active:scale-95 cursor-pointer"
+                  style={{ color: theme.textSecondary }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    if (linkUrl) {
+                      applyFormatting('link', linkUrl);
+                    }
+                    setShowLinkDialog(false);
+                  }}
+                  className="px-4 py-1.5 text-xs font-semibold rounded-lg transition-all active:scale-95 cursor-pointer"
+                  style={{ backgroundColor: theme.accent, color: theme.surface }}
+                >
+                  Save
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Image Dialog */}
+      <AnimatePresence>
+        {showImageDialog && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm"
+            onClick={() => setShowImageDialog(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="rounded-xl border shadow-xl p-5 w-[320px]"
+              style={{ backgroundColor: theme.surface, borderColor: theme.surfaceBorder }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-sm font-semibold mb-3" style={{ color: theme.textPrimary }}>
+                Insert image
+              </h3>
+              <input
+                type="url"
+                value={imageUrl}
+                onChange={(e) => setImageUrl(e.target.value)}
+                placeholder="https://example.com/image.png"
+                className="w-full px-3 py-2 rounded-lg border text-sm outline-none transition-colors"
+                style={{
+                  borderColor: theme.surfaceBorder,
+                  backgroundColor: theme.background,
+                  color: theme.textPrimary,
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (imageUrl) {
+                      applyFormatting('image', imageUrl);
+                      setShowImageDialog(false);
+                    }
+                  }
+                }}
+              />
+
+              {driveConnected && (
+                <>
+                  <div className="flex items-center gap-2 my-3">
+                    <div className="flex-1 h-px" style={{ backgroundColor: theme.surfaceBorder }} />
+                    <span className="text-[10px] font-mono uppercase tracking-wider opacity-40" style={{ color: theme.textSecondary }}>or</span>
+                    <div className="flex-1 h-px" style={{ backgroundColor: theme.surfaceBorder }} />
+                  </div>
+                  <button
+                    onClick={async () => {
+                      const result = await openGoogleDrivePicker('image');
+                      if (result) {
+                        applyFormatting('image', '', result.fileId);
+                        setShowImageDialog(false);
+                      }
+                    }}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border text-xs font-semibold transition-all active:scale-95 cursor-pointer"
+                    style={{ borderColor: theme.surfaceBorder, color: theme.textSecondary }}
+                  >
+                    Choose from Google Drive
+                  </button>
+                </>
+              )}
+
+              <div className="flex items-center gap-2 justify-end mt-3">
+                <button
+                  onClick={() => setShowImageDialog(false)}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg transition-all active:scale-95 cursor-pointer"
+                  style={{ color: theme.textSecondary }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    if (imageUrl) {
+                      applyFormatting('image', imageUrl);
+                      setShowImageDialog(false);
+                    }
+                  }}
+                  className="px-4 py-1.5 text-xs font-semibold rounded-lg transition-all active:scale-95 cursor-pointer"
+                  style={{ backgroundColor: theme.accent, color: theme.surface }}
+                >
+                  Insert
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Video Dialog */}
+      <AnimatePresence>
+        {showVideoDialog && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm"
+            onClick={() => setShowVideoDialog(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="rounded-xl border shadow-xl p-5 w-[340px]"
+              style={{ backgroundColor: theme.surface, borderColor: theme.surfaceBorder }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-sm font-semibold mb-3" style={{ color: theme.textPrimary }}>
+                Insert video
+              </h3>
+              <input
+                type="url"
+                value={videoUrl}
+                onChange={(e) => setVideoUrl(e.target.value)}
+                placeholder="https://youtube.com/watch?v=... or video URL"
+                className="w-full px-3 py-2 rounded-lg border text-sm outline-none transition-colors"
+                style={{
+                  borderColor: theme.surfaceBorder,
+                  backgroundColor: theme.background,
+                  color: theme.textPrimary,
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (videoUrl) {
+                      applyFormatting('video', videoUrl);
+                      setShowVideoDialog(false);
+                    }
+                  }
+                }}
+              />
+
+              <p className="text-[10px] font-mono opacity-40 mt-2 text-center" style={{ color: theme.textSecondary }}>
+                YouTube, Vimeo URLs auto-convert to embeds
+              </p>
+
+              {driveConnected && (
+                <>
+                  <div className="flex items-center gap-2 my-3">
+                    <div className="flex-1 h-px" style={{ backgroundColor: theme.surfaceBorder }} />
+                    <span className="text-[10px] font-mono uppercase tracking-wider opacity-40" style={{ color: theme.textSecondary }}>or</span>
+                    <div className="flex-1 h-px" style={{ backgroundColor: theme.surfaceBorder }} />
+                  </div>
+                  <button
+                    onClick={async () => {
+                      const result = await openGoogleDrivePicker('video');
+                      if (result) {
+                        applyFormatting('video', '', result.fileId);
+                        setShowVideoDialog(false);
+                      }
+                    }}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border text-xs font-semibold transition-all active:scale-95 cursor-pointer"
+                    style={{ borderColor: theme.surfaceBorder, color: theme.textSecondary }}
+                  >
+                    Choose from Google Drive
+                  </button>
+                </>
+              )}
+
+              <div className="flex items-center gap-2 justify-end mt-3">
+                <button
+                  onClick={() => setShowVideoDialog(false)}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg transition-all active:scale-95 cursor-pointer"
+                  style={{ color: theme.textSecondary }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    if (videoUrl) {
+                      applyFormatting('video', videoUrl);
+                      setShowVideoDialog(false);
+                    }
+                  }}
+                  className="px-4 py-1.5 text-xs font-semibold rounded-lg transition-all active:scale-95 cursor-pointer"
+                  style={{ backgroundColor: theme.accent, color: theme.surface }}
+                >
+                  Insert
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 });

@@ -1,0 +1,476 @@
+{
+  "nodes": [
+    {
+      "id": "readme",
+      "label": "README - opnjrnl",
+      "file_type": "document",
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "license",
+      "label": "MIT License",
+      "file_type": "document",
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\LICENSE.txt",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "index",
+      "label": "Main HTML Entry",
+      "file_type": "document",
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\index.html",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "github_workflows_deploy",
+      "label": "GitHub Pages Deploy Workflow",
+      "file_type": "document",
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\.github\\workflows\\deploy.yml",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "github_workflows_pwa_release",
+      "label": "PWA Release Workflow",
+      "file_type": "document",
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\.github\\workflows\\pwa-release.yml",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "public_privacy",
+      "label": "Privacy Policy",
+      "file_type": "document",
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\public\\privacy.html",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "public_terms",
+      "label": "Terms of Service",
+      "file_type": "document",
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\public\\terms.html",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "public_license",
+      "label": "License Agreement HTML",
+      "file_type": "document",
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\public\\license.html",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "public_googlec93b3c8bfa980cad",
+      "label": "Google Site Verification",
+      "file_type": "document",
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\public\\googlec93b3c8bfa980cad.html",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "public_icon",
+      "label": "App Icon SVG - Notebook Icon",
+      "file_type": "image",
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\public\\icon.svg",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "opnjrnl",
+      "label": "opnjrnl - Minimal Journal App",
+      "file_type": "concept",
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "offline_first_journal",
+      "label": "Offline-First Journaling",
+      "file_type": "rationale",
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "localstorage_data",
+      "label": "LocalStorage Data Storage",
+      "file_type": "concept",
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "webauthn_auth",
+      "label": "WebAuthn Biometric Authentication",
+      "file_type": "concept",
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "pwa_support",
+      "label": "PWA Installable App",
+      "file_type": "concept",
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "google_drive_sync",
+      "label": "Google Drive Sync",
+      "file_type": "concept",
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "react_vite_tailwind",
+      "label": "React Vite Tailwind Stack",
+      "file_type": "concept",
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "export_import",
+      "label": "JSON Export Import",
+      "file_type": "concept",
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "push_reminders",
+      "label": "Push Notification Reminders",
+      "file_type": "concept",
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "multiple_themes",
+      "label": "Multiple Minimalist Themes",
+      "file_type": "concept",
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\README.md",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "github_pages",
+      "label": "GitHub Pages Deployment",
+      "file_type": "concept",
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\.github\\workflows\\deploy.yml",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    },
+    {
+      "id": "pwabuilder",
+      "label": "PWABuilder Native Packaging",
+      "file_type": "concept",
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\.github\\workflows\\pwa-release.yml",
+      "source_location": null,
+      "source_url": null,
+      "captured_at": null,
+      "author": null,
+      "contributor": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "opnjrnl",
+      "target": "offline_first_journal",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "opnjrnl",
+      "target": "localstorage_data",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "opnjrnl",
+      "target": "webauthn_auth",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "opnjrnl",
+      "target": "pwa_support",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "opnjrnl",
+      "target": "google_drive_sync",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "opnjrnl",
+      "target": "react_vite_tailwind",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "opnjrnl",
+      "target": "export_import",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "opnjrnl",
+      "target": "push_reminders",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "opnjrnl",
+      "target": "multiple_themes",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme",
+      "target": "opnjrnl",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "github_workflows_deploy",
+      "target": "github_pages",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\.github\\workflows\\deploy.yml",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "github_workflows_pwa_release",
+      "target": "pwabuilder",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\.github\\workflows\\pwa-release.yml",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "pwa_support",
+      "target": "pwabuilder",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\.github\\workflows\\pwa-release.yml",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme",
+      "target": "pwa_support",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme",
+      "target": "index",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\index.html",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "readme",
+      "target": "public_license",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "public_privacy",
+      "target": "public_terms",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\public\\privacy.html",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "public_privacy",
+      "target": "google_drive_sync",
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\public\\privacy.html",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "offline_first_journal",
+      "target": "localstorage_data",
+      "relation": "conceptually_related_to",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "offline_first_journal",
+      "target": "webauthn_auth",
+      "relation": "conceptually_related_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\README.md",
+      "source_location": null,
+      "weight": 1.0
+    },
+    {
+      "source": "public_icon",
+      "target": "opnjrnl",
+      "relation": "references",
+      "confidence": "INFERRED",
+      "confidence_score": 0.95,
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\public\\icon.svg",
+      "source_location": null,
+      "weight": 1.0
+    }
+  ],
+  "hyperedges": [
+    {
+      "id": "opnjrnl_legal_docs",
+      "label": "opnjrnl Legal Documents",
+      "nodes": [
+        "public_privacy",
+        "public_terms",
+        "public_license",
+        "license"
+      ],
+      "relation": "participate_in",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "C:\\Users\\LJ\\Documents\\Projects\\opnjrnl\\public\\privacy.html"
+    }
+  ],
+  "input_tokens": 0,
+  "output_tokens": 0
+}

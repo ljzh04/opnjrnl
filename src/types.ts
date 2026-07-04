@@ -1,3 +1,12 @@
+export interface Attachment {
+  id: string;
+  name: string;
+  type: string;
+  data: string;
+  size: number;
+  createdAt: number;
+}
+
 export interface JournalEntry {
   id: string;
   title: string;
@@ -7,6 +16,7 @@ export interface JournalEntry {
   mood?: string;
   tags: string[];
   isFavorite?: boolean;
+  attachments?: Attachment[];
 }
 
 export type MinimalThemeId = 'paper' | 'cream' | 'charcoal';

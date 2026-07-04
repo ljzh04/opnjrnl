@@ -1061,6 +1061,7 @@ export default function App() {
           onDelete={handleDeleteEntry}
           theme={currentTheme}
           allUserTags={allUserTags}
+          driveConnected={driveConnected}
         />
       </div>
 
@@ -1105,6 +1106,7 @@ export default function App() {
                 onDelete={handleDeleteEntry}
                 theme={currentTheme}
                 allUserTags={allUserTags}
+                driveConnected={driveConnected}
               />
             </div>
           </motion.div>
