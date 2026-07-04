@@ -4,6 +4,7 @@ import firebaseConfig from '../../firebase-applet-config.json'
 declare global {
   interface Window {
     gapi?: any
+    google?: any
   }
 }
 
@@ -35,6 +36,10 @@ async function ensurePickerApi(): Promise<void> {
   return loadPromise
 }
 
+function getPicker() {
+  return window.google?.picker || window.gapi?.picker
+}
+
 export async function openGoogleDrivePicker(
   pickerType: 'image' | 'video'
 ): Promise<{ fileId: string; name: string } | null> {
@@ -44,28 +49,32 @@ export async function openGoogleDrivePicker(
     const token = await getAccessToken()
     if (!token) throw new Error('Not authenticated')
 
+    const picker = getPicker()
+    if (!picker) throw new Error('Google Picker API not loaded')
+
     const viewId = pickerType === 'image'
-      ? window.gapi.picker.ViewId.DOCS_IMAGES
-      : window.gapi.picker.ViewId.DOCS_VIDEOS
+      ? picker.ViewId.DOCS_IMAGES
+      : picker.ViewId.DOCS_VIDEOS
 
     return new Promise((resolve) => {
-      const view = new window.gapi.picker.View(viewId)
+      const view = new picker.View(viewId)
 
-      const picker = new window.gapi.picker.PickerBuilder()
+      const pickerBuilder = new picker.PickerBuilder()
         .setOAuthToken(token)
         .addView(view)
         .setDeveloperKey(firebaseConfig.apiKey)
+        .setAppId(firebaseConfig.messagingSenderId)
         .setCallback((data: any) => {
-          if (data.action === window.gapi.picker.Action.PICKED) {
+          if (data.action === picker.Action.PICKED) {
             const doc = data.docs[0]
             resolve({ fileId: doc.id, name: doc.name })
-          } else if (data.action === window.gapi.picker.Action.CANCEL) {
+          } else if (data.action === picker.Action.CANCEL) {
             resolve(null)
           }
         })
         .build()
 
-      picker.setVisible(true)
+      pickerBuilder.setVisible(true)
     })
   } catch (err) {
     console.error('Google Drive picker error:', err)
