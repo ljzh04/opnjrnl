@@ -62,7 +62,7 @@ export async function openGoogleDrivePicker(
       const pickerBuilder = new picker.PickerBuilder()
         .setOAuthToken(token)
         .addView(view)
-        .setDeveloperKey(firebaseConfig.apiKey)
+        .setDeveloperKey(firebaseConfig.pickerApiKey)
         .setAppId(firebaseConfig.messagingSenderId)
         .setCallback((data: any) => {
           if (data.action === picker.Action.PICKED) {
