@@ -7,9 +7,24 @@ const auth = getAuth(app);
 
 const provider = new GoogleAuthProvider();
 provider.addScope('https://www.googleapis.com/auth/drive.appdata');
+provider.addScope('https://www.googleapis.com/auth/drive.file');
 
 let isSigningIn = false;
 let cachedAccessToken: string | null = null;
+
+const SCOPE_VERSION = 2;
+
+function getStoredScopeVersion(): number {
+  const v = localStorage.getItem('opnjrnl_scope_version');
+  return v ? parseInt(v, 10) : 0;
+}
+
+function invalidateToken() {
+  cachedAccessToken = null;
+  localStorage.removeItem('opnjrnl_google_access_token');
+  localStorage.removeItem('opnjrnl_google_token_saved_at');
+  localStorage.removeItem('opnjrnl_scope_version');
+}
 
 export const initAuth = (
   onAuthSuccess?: (user: User, token: string | null) => void,
@@ -19,13 +34,10 @@ export const initAuth = (
   const savedAtStr = localStorage.getItem('opnjrnl_google_token_saved_at');
   if (storedToken && savedAtStr) {
     const savedAt = parseInt(savedAtStr, 10);
-    // Is the token less than 50 minutes old? (Google OAuth tokens expire in 60 minutes)
-    if (Date.now() - savedAt < 50 * 60 * 1000) {
+    if (Date.now() - savedAt < 50 * 60 * 1000 && getStoredScopeVersion() === SCOPE_VERSION) {
       cachedAccessToken = storedToken;
     } else {
-      cachedAccessToken = null;
-      localStorage.removeItem('opnjrnl_google_access_token');
-      localStorage.removeItem('opnjrnl_google_token_saved_at');
+      invalidateToken();
     }
   }
 
@@ -33,9 +45,7 @@ export const initAuth = (
     if (user) {
         if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
     } else {
-      cachedAccessToken = null;
-      localStorage.removeItem('opnjrnl_google_access_token');
-      localStorage.removeItem('opnjrnl_google_token_saved_at');
+      invalidateToken();
       if (onAuthFailure) onAuthFailure();
     }
   });
@@ -53,6 +63,7 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     cachedAccessToken = credential.accessToken;
     localStorage.setItem('opnjrnl_google_access_token', cachedAccessToken);
     localStorage.setItem('opnjrnl_google_token_saved_at', Date.now().toString());
+    localStorage.setItem('opnjrnl_scope_version', SCOPE_VERSION.toString());
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
     console.error('Sign in error:', error);
@@ -67,7 +78,7 @@ export const getAccessToken = async (): Promise<string | null> => {
   const savedAtStr = localStorage.getItem('opnjrnl_google_token_saved_at');
   if (storedToken && savedAtStr) {
     const savedAt = parseInt(savedAtStr, 10);
-    if (Date.now() - savedAt < 50 * 60 * 1000) {
+    if (Date.now() - savedAt < 50 * 60 * 1000 && getStoredScopeVersion() === SCOPE_VERSION) {
       return storedToken;
     }
   }
@@ -76,7 +87,5 @@ export const getAccessToken = async (): Promise<string | null> => {
 
 export const logout = async () => {
   await auth.signOut();
-  cachedAccessToken = null;
-  localStorage.removeItem('opnjrnl_google_access_token');
-  localStorage.removeItem('opnjrnl_google_token_saved_at');
+  invalidateToken();
 };
