@@ -1,7 +1,8 @@
-import { JournalEntry, MinimalTheme, Attachment } from '../types';
+import { JournalEntry, MinimalTheme } from '../types';
 import { format } from 'date-fns';
 import { MOOD_SCALE } from '../themeData';
 import { useEffect, useLayoutEffect, useState, useRef, KeyboardEvent, ReactNode, memo, useMemo } from 'react';
+import { useDebouncedSave } from '../hooks/useDebouncedSave';
 import {
   Heart, 
   Trash2, 
@@ -19,7 +20,7 @@ import {
   Shield,
   Lock,
   Info,
-  Paperclip,
+  Music,
   Link2,
   Bold,
   Italic,
@@ -45,6 +46,7 @@ import TipTapUnderline from '@tiptap/extension-underline';
 import TipTapLink from '@tiptap/extension-link';
 import Placeholder from '@tiptap/extension-placeholder';
 import ResizableImage from '../extensions/ResizableImage';
+import ResizableAudio from '../extensions/ResizableAudio';
 import ResizableVideo, { toEmbedUrl, detectVideoType } from '../extensions/ResizableVideo';
 import { openGoogleDrivePicker } from '../lib/drivePicker';
 
@@ -133,10 +135,10 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
   const [imageUrl, setImageUrl] = useState('');
   const [showVideoDialog, setShowVideoDialog] = useState(false);
   const [videoUrl, setVideoUrl] = useState('');
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [showAudioDialog, setShowAudioDialog] = useState(false);
+  const [audioUrl, setAudioUrl] = useState('');
 
   const titleRef = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const linkInputRef = useRef<HTMLInputElement>(null);
   const linkSelectionRef = useRef<{ from: number; to: number } | null>(null);
 
@@ -147,6 +149,7 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
       TipTapLink.configure({ openOnClick: false }),
       ResizableImage,
       ResizableVideo,
+      ResizableAudio,
       Placeholder.configure({ placeholder: "Begin writing..." }),
     ],
     content: entry?.content || '',
@@ -168,7 +171,6 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
     if (entry) {
       setTitle(entry.title);
       setContent(entry.content);
-      setAttachments(entry.attachments || []);
       setShowDeleteConfirm(false);
       if (editor && editor.getHTML() !== entry.content) {
         queueMicrotask(() => editor.commands.setContent(entry.content));
@@ -176,7 +178,6 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
     } else {
       setTitle('');
       setContent('');
-      setAttachments([]);
       setShowDeleteConfirm(false);
       if (editor) {
         queueMicrotask(() => editor.commands.setContent(''));
@@ -185,21 +186,7 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
   }, [entry?.id, editor]);
 
   // Debounced auto-save
-  useEffect(() => {
-    if (!entry) return;
-    
-    const timeout = setTimeout(() => {
-      onUpdate(entry.id, { 
-        title, 
-        content, 
-        attachments,
-        updatedAt: Date.now() 
-      });
-    }, 600);
-    
-    return () => clearTimeout(timeout);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [title, content, attachments]);
+  useDebouncedSave(entry, title, content, onUpdate);
 
   const resizeTextarea = (el: HTMLTextAreaElement | null) => {
     if (!el) return;
@@ -300,6 +287,11 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
           editor.chain().focus().setResizableVideo({ src: embedUrl, type: vType, driveFileId }).run();
         }
         break;
+      case "audio":
+        if (url || driveFileId) {
+          editor.chain().focus().setResizableAudio({ src: url || '', driveFileId }).run();
+        }
+        break;
       case "undo":
         editor.chain().focus().undo().run();
         break;
@@ -375,7 +367,8 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
   };
 
   const wordsCount = useMemo(() => {
-    return content.trim() === '' ? 0 : content.trim().split(/\s+/).length;
+    const text = content.replace(/<[^>]*>/g, '');
+    return text.trim() === '' ? 0 : text.trim().split(/\s+/).length;
   }, [content]);
 
   // Extract all unique tags historically typed by user, excluding those on the active entry
@@ -778,56 +771,14 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
             </BubbleMenu>
           )}
 
-          {/* File Attachments Section */}
-          {attachments.length > 0 && (
-            <div className="w-full max-w-[65ch] mx-auto mt-6 space-y-2">
-              <span className="font-mono text-[9px] uppercase opacity-40 tracking-[0.1em]">Attachments</span>
-              <div className="flex flex-col gap-2">
-                {attachments.map((att) => (
-                  <div
-                    key={att.id}
-                    className="flex items-center gap-3 px-3 py-2.5 rounded-xl border text-xs"
-                    style={{ borderColor: theme.surfaceBorder, backgroundColor: theme.background }}
-                  >
-                    <FileText className="w-4 h-4 shrink-0 opacity-60" style={{ color: theme.textSecondary }} />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate" style={{ color: theme.textPrimary }}>{att.name}</p>
-                      <p className="text-[10px] opacity-50 font-mono" style={{ color: theme.textSecondary }}>
-                        {(att.size / 1024).toFixed(1)} KB
-                      </p>
-                    </div>
-                    <a
-                      href={att.data}
-                      download={att.name}
-                      className="p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer"
-                      style={{ color: theme.textSecondary }}
-                      title="Download"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
-                    <button
-                      onClick={() => {
-                        const next = attachments.filter((a) => a.id !== att.id);
-                        setAttachments(next);
-                      }}
-                      className="p-2 rounded-full transition-all opacity-40 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer"
-                      style={{ color: theme.textSecondary }}
-                      title="Remove"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+
         </div>
       </article>
 
       {/* Sticky Utility Ribbon (Gmail style) */}
       <div className="sticky bottom-0 left-0 right-0 w-full flex justify-center pb-4 md:pb-6 pointer-events-none z-10 px-4">
         <div 
-          className="pointer-events-auto flex items-center gap-1.5 px-3 py-2 rounded-full border shadow-lg backdrop-blur-md transition-colors"
+          className="pointer-events-auto flex flex-wrap items-center justify-center sm:justify-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-2 sm:py-2.5 rounded-2xl border shadow-lg backdrop-blur-md transition-colors w-full max-w-[65ch]"
           style={{ 
             backgroundColor: theme.surface,
             borderColor: theme.surfaceBorder 
@@ -835,22 +786,22 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
         >
           {/* Undo / Redo */}
           <button 
-            className="p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
+            className="p-1.5 sm:p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
             style={{ color: theme.textPrimary }}
             title="Undo"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => applyFormatting('undo')}
           >
-            <Undo className="w-4 h-4" />
+            <Undo className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </button>
           <button 
-            className="p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
+            className="p-1.5 sm:p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
             style={{ color: theme.textPrimary }}
             title="Redo"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => applyFormatting('redo')}
           >
-            <Redo className="w-4 h-4" />
+            <Redo className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </button>
 
           <div className="w-px h-5 mx-1" style={{ backgroundColor: theme.surfaceBorder }}></div>
@@ -858,56 +809,47 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
           {/* Format Section */}
 
           <button 
-            className="p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
+            className="p-1.5 sm:p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
             style={{ color: theme.textPrimary }}
             title="Bold"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => applyFormatting('bold')}
           >
-            <Bold className="w-4 h-4" />
+            <Bold className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </button>
           <button 
-            className="p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
+            className="p-1.5 sm:p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
             style={{ color: theme.textPrimary }}
             title="Italic"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => applyFormatting('italic')}
           >
-            <Italic className="w-4 h-4" />
+            <Italic className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </button>
           <button 
-            className="p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
+            className="p-1.5 sm:p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
             style={{ color: theme.textPrimary }}
             title="Underline"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => applyFormatting('underline')}
           >
-            <Underline className="w-4 h-4" />
+            <Underline className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </button>
           <button 
-            className="p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
+            className="p-1.5 sm:p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
             style={{ color: theme.textPrimary }}
             title="Bulleted list"
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => applyFormatting('bulletList')}
           >
-            <List className="w-4 h-4" />
+            <List className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </button>
           
           <div className="w-px h-5 mx-1" style={{ backgroundColor: theme.surfaceBorder }}></div>
 
-          {/* Attachments & Links Section */}
+          {/* Link & Media Section */}
           <button 
-            className="p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
-            style={{ color: theme.textPrimary }}
-            title="Attach files"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <Paperclip className="w-4 h-4" />
-          </button>
-          <button 
-            className="p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
+            className="p-1.5 sm:p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
             style={{ color: theme.textPrimary }}
             title="Insert link"
             onMouseDown={(e) => e.preventDefault()}
@@ -921,10 +863,22 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
               setTimeout(() => linkInputRef.current?.focus(), 100);
             }}
           >
-            <Link2 className="w-4 h-4" />
+            <Link2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </button>
           <button 
-            className="p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
+            className="p-1.5 sm:p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
+            style={{ color: theme.textPrimary }}
+            title="Insert audio"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              setAudioUrl('');
+              setShowAudioDialog(true);
+            }}
+          >
+            <Music className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          </button>
+          <button 
+            className="p-1.5 sm:p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
             style={{ color: theme.textPrimary }}
             title="Insert image"
             onMouseDown={(e) => e.preventDefault()}
@@ -933,10 +887,10 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
               setShowImageDialog(true);
             }}
           >
-            <ImageIcon className="w-4 h-4" />
+            <ImageIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </button>
           <button 
-            className="p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
+            className="p-1.5 sm:p-2 rounded-full transition-all opacity-60 hover:opacity-100 active:scale-95 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer" 
             style={{ color: theme.textPrimary }}
             title="Insert video"
             onMouseDown={(e) => e.preventDefault()}
@@ -945,39 +899,10 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
               setShowVideoDialog(true);
             }}
           >
-            <VideoIcon className="w-4 h-4" />
+            <VideoIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </button>
         </div>
       </div>
-
-      {/* Hidden file inputs */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        className="hidden"
-        onChange={(e) => {
-          const files = Array.from(e.target.files || []);
-          files.forEach((file) => {
-            const reader = new FileReader();
-            reader.onload = (ev) => {
-              const data = ev.target?.result as string;
-              const newAtt: Attachment = {
-                id: crypto.randomUUID(),
-                name: file.name,
-                type: file.type,
-                data,
-                size: file.size,
-                createdAt: Date.now(),
-              };
-              setAttachments((prev) => [...prev, newAtt]);
-              triggerToast(`Attached ${file.name}`);
-            };
-            reader.readAsDataURL(file);
-          });
-          e.target.value = '';
-        }}
-      />
 
       {/* Link Dialog */}
       <AnimatePresence>
@@ -1236,6 +1161,102 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
                     if (videoUrl) {
                       applyFormatting('video', videoUrl);
                       setShowVideoDialog(false);
+                    }
+                  }}
+                  className="px-4 py-1.5 text-xs font-semibold rounded-lg transition-all active:scale-95 cursor-pointer"
+                  style={{ backgroundColor: theme.accent, color: theme.surface }}
+                >
+                  Insert
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Audio Dialog */}
+      <AnimatePresence>
+        {showAudioDialog && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm"
+            onClick={() => setShowAudioDialog(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="rounded-xl border shadow-xl p-5 w-[340px]"
+              style={{ backgroundColor: theme.surface, borderColor: theme.surfaceBorder }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-sm font-semibold mb-3" style={{ color: theme.textPrimary }}>
+                Insert audio
+              </h3>
+              <input
+                type="url"
+                value={audioUrl}
+                onChange={(e) => setAudioUrl(e.target.value)}
+                placeholder="https://example.com/audio.mp3"
+                className="w-full px-3 py-2 rounded-lg border text-sm outline-none transition-colors"
+                style={{
+                  borderColor: theme.surfaceBorder,
+                  backgroundColor: theme.background,
+                  color: theme.textPrimary,
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    if (audioUrl) {
+                      applyFormatting('audio', audioUrl);
+                      setShowAudioDialog(false);
+                    }
+                  }
+                }}
+              />
+
+              <p className="text-[10px] font-mono opacity-40 mt-2 text-center" style={{ color: theme.textSecondary }}>
+                Direct URL to an audio file (MP3, WAV, OGG, etc.)
+              </p>
+
+              {driveConnected && (
+                <>
+                  <div className="flex items-center gap-2 my-3">
+                    <div className="flex-1 h-px" style={{ backgroundColor: theme.surfaceBorder }} />
+                    <span className="text-[10px] font-mono uppercase tracking-wider opacity-40" style={{ color: theme.textSecondary }}>or</span>
+                    <div className="flex-1 h-px" style={{ backgroundColor: theme.surfaceBorder }} />
+                  </div>
+                  <button
+                    onClick={async () => {
+                      const result = await openGoogleDrivePicker('audio');
+                      if (result) {
+                        applyFormatting('audio', '', result.fileId);
+                        setShowAudioDialog(false);
+                      }
+                    }}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border text-xs font-semibold transition-all active:scale-95 cursor-pointer"
+                    style={{ borderColor: theme.surfaceBorder, color: theme.textSecondary }}
+                  >
+                    Choose from Google Drive
+                  </button>
+                </>
+              )}
+
+              <div className="flex items-center gap-2 justify-end mt-3">
+                <button
+                  onClick={() => setShowAudioDialog(false)}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg transition-all active:scale-95 cursor-pointer"
+                  style={{ color: theme.textSecondary }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    if (audioUrl) {
+                      applyFormatting('audio', audioUrl);
+                      setShowAudioDialog(false);
                     }
                   }}
                   className="px-4 py-1.5 text-xs font-semibold rounded-lg transition-all active:scale-95 cursor-pointer"

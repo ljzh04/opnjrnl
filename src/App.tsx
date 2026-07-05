@@ -15,6 +15,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { get, set, del } from 'idb-keyval';
 import { initAuth, googleSignIn, getAccessToken, logout } from './lib/auth';
 import { registerDeviceLock, verifyDeviceLock } from './lib/webauthn';
+import { mergeEntries } from './lib/syncMerge';
+import { clearData } from './lib/clearData';
 
 const ENTRIES_STORAGE_KEY = 'minimal-journal-entries';
 const THEME_STORAGE_KEY = 'minimal-journal-theme';
@@ -284,21 +286,7 @@ export default function App() {
     const { accessToken, user, cloudEntries, activeFileId } = syncChoiceData;
     
     // Perform standard conflict-free merge
-    const map = new Map<string, JournalEntry>();
-    entries.forEach(e => map.set(e.id, e));
-    cloudEntries.forEach((e: any) => {
-      const existing = map.get(e.id);
-      if (!existing) {
-        map.set(e.id, e);
-      } else {
-        const existingTime = existing.updatedAt || existing.createdAt || 0;
-        const cloudTime = e.updatedAt || e.createdAt || 0;
-        if (cloudTime > existingTime) {
-          map.set(e.id, e);
-        }
-      }
-    });
-    const merged = Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);
+    const merged = mergeEntries(entries, cloudEntries);
     
     // Update local state and IndexedDB
     setEntries(merged);
@@ -528,21 +516,7 @@ export default function App() {
               const cloudEntries = await downloadRes.json();
               if (Array.isArray(cloudEntries)) {
                 // Perform two-way conflict-free merge
-                const map = new Map<string, JournalEntry>();
-                dataToSync.forEach(e => map.set(e.id, e));
-                cloudEntries.forEach((e: any) => {
-                  const existing = map.get(e.id);
-                  if (!existing) {
-                    map.set(e.id, e);
-                  } else {
-                    const existingTime = existing.updatedAt || existing.createdAt || 0;
-                    const cloudTime = e.updatedAt || e.createdAt || 0;
-                    if (cloudTime > existingTime) {
-                      map.set(e.id, e);
-                    }
-                  }
-                });
-                const merged = Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);
+                const merged = mergeEntries(dataToSync, cloudEntries);
                 
                 // Write merged results back to current browser state
                 setEntries(merged);
@@ -713,73 +687,33 @@ export default function App() {
   };
 
   const handleClearAllData = async (options?: { deleteCloudBackup?: boolean }) => {
-    // 1. Instantly clear any pending debounced backup syncs to prevent auto-overwrites
     if (syncTimeoutRef.current) {
       clearTimeout(syncTimeoutRef.current);
       syncTimeoutRef.current = null;
     }
 
-    // 2. Clear cloud boundaries before purging local data to prevent empty list sync
-    if (driveConnected) {
-      if (options?.deleteCloudBackup) {
-        try {
-          const accessToken = await getAccessToken();
-          if (accessToken) {
-            let fileId = await get<string>(DRIVE_FILE_ID_KEY);
-            if (!fileId) {
-              const fileQ = encodeURIComponent("name = 'opnjrnl_backup.json' and trashed = false");
-              const fileRes = await fetch(`https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${fileQ}&fields=files(id)`, {
-                headers: { Authorization: `Bearer ${accessToken}` }
-              });
-              const fileData = await fileRes.json();
-              if (fileData.files && fileData.files.length > 0) {
-                fileId = fileData.files[0].id;
-              }
-            }
+    await clearData(
+      {
+        getAccessToken,
+        driveFileIdGet: () => get<string>(DRIVE_FILE_ID_KEY),
+        driveFileIdDel: () => del(DRIVE_FILE_ID_KEY),
+        logout,
+        driveFetch: fetch,
+        entriesDel: () => del(ENTRIES_STORAGE_KEY),
+        appPasswordDel: () => del(APP_PASSWORD_KEY),
+        syslockDel: () => del(APP_SYSLOCK_KEY),
+        localStorageRemoveItem: (key: string) => localStorage.removeItem(key),
+      },
+      options,
+    );
 
-            if (fileId) {
-              console.log("Found backup file id. Initiating Cloud backup erasure:", fileId);
-              await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
-                method: 'DELETE',
-                headers: { Authorization: `Bearer ${accessToken}` }
-              });
-              console.log("Cloud backup deleted successfully.");
-            }
-          }
-        } catch (err) {
-          console.error("Failed to delete remote cloud backup:", err);
-        }
-      }
-
-      // Automatically terminate authorization and unlink Google drive connection
-      try {
-        await logout();
-      } catch (err) {
-        console.error("Cloud logout execution error:", err);
-      }
-      setDriveConnected(false);
-      setCurrentUser(null);
-      await del(DRIVE_FILE_ID_KEY);
-    }
-
-    // 3. Purge active in-memory user workspace
+    setDriveConnected(false);
+    setCurrentUser(null);
     setEntries([]);
     setActiveEntryId(null);
     clearUndoState();
     setAppPassword(null);
     setSystemLockId(null);
-
-    // 4. Wipe localizedIndexed DB stores
-    try {
-      await del(ENTRIES_STORAGE_KEY);
-      await del(APP_PASSWORD_KEY);
-      await del(APP_SYSLOCK_KEY);
-    } catch (err) {
-      console.error("Failed to delete local storage database partitions:", err);
-    }
-
-    localStorage.removeItem('patched-commit-sha');
-    localStorage.removeItem('last-notif-fired');
   };
 
   // Export JSON file
@@ -818,7 +752,8 @@ export default function App() {
                 updatedAt: item.updatedAt || Date.now(),
                 mood: item.mood,
                 tags: Array.isArray(item.tags) ? item.tags : [],
-                isFavorite: !!item.isFavorite
+                isFavorite: !!item.isFavorite,
+                attachments: Array.isArray(item.attachments) ? item.attachments : undefined
               };
             });
 

@@ -41,7 +41,7 @@ function getPicker() {
 }
 
 export async function openGoogleDrivePicker(
-  pickerType: 'image' | 'video'
+  pickerType: 'image' | 'video' | 'audio'
 ): Promise<{ fileId: string; name: string } | null> {
   try {
     await ensurePickerApi()
@@ -54,7 +54,9 @@ export async function openGoogleDrivePicker(
 
     const viewId = pickerType === 'image'
       ? picker.ViewId.DOCS_IMAGES
-      : picker.ViewId.DOCS_VIDEOS
+      : pickerType === 'video'
+        ? picker.ViewId.DOCS_VIDEOS
+        : picker.ViewId.DOCS_AUDIO || picker.ViewId.DOCS
 
     return new Promise((resolve) => {
       const view = new picker.View(viewId)

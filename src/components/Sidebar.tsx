@@ -216,7 +216,7 @@ const Sidebar = memo(function Sidebar({
     .map(t => t.trim())
     .filter(Boolean), [entries]);
 
-  const stripMarkdown = (str: string) => {
+  const stripHtml = (str: string) => {
     if (!str) return "Start taking records...";
     return str.replace(/<[^>]*>?/gm, "").trim();
   };
@@ -942,7 +942,7 @@ const Sidebar = memo(function Sidebar({
                           className="text-xs line-clamp-2 leading-relaxed opacity-70 font-sans mb-3 pr-2.5"
                           style={{ color: theme.textSecondary }}
                         >
-                          {stripMarkdown(entry.content)}
+                          {stripHtml(entry.content)}
                         </p>
 
                         {/* Metadata block OR Interactive Delete Confirmation */}
