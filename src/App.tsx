@@ -13,7 +13,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { ArrowLeft, RefreshCw, ArrowUpFromLine, ArrowDownToLine, Cloud, Info, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { get, set, del } from 'idb-keyval';
-import { initAuth, googleSignIn, getAccessToken, logout } from './lib/auth';
+import { initAuth, googleSignIn, getAccessToken, logout, startTokenRefresh, stopTokenRefresh, setRefreshStateCallback, setRefreshSuccessCallback, isAutoRefreshEnabled as getAutoRefreshSetting, setAutoRefreshEnabled as setAutoRefreshSetting } from './lib/auth';
 import { registerDeviceLock, verifyDeviceLock } from './lib/webauthn';
 import { mergeEntries } from './lib/syncMerge';
 import { clearData } from './lib/clearData';
@@ -114,6 +114,8 @@ export default function App() {
   const [showConfirmDisconnect, setShowConfirmDisconnect] = useState(false);
   const [isSyncingBackground, setIsSyncingBackground] = useState(false);
   const [cloudProgressScreen, setCloudProgressScreen] = useState<{ title: string; subtitle: string } | null>(null);
+  const [isRefreshingToken, setIsRefreshingToken] = useState(false);
+  const [autoRefreshEnabled, setAutoRefreshEnabledLocal] = useState(getAutoRefreshSetting());
   const [syncChoiceData, setSyncChoiceData] = useState<{
     accessToken: string;
     user: any;
@@ -228,6 +230,10 @@ export default function App() {
     }
 
     // Initialize Auth
+    setRefreshStateCallback(setIsRefreshingToken);
+    setRefreshSuccessCallback(() => {
+      setDriveConnected(true);
+    });
     initAuth(
       (user, token) => {
         setCurrentUser(user);
@@ -239,6 +245,21 @@ export default function App() {
       }
     );
   }, []);
+
+  // Start/stop token refresh loop when auto-refresh setting changes
+  useEffect(() => {
+    if (currentUser && autoRefreshEnabled) {
+      startTokenRefresh();
+    } else {
+      stopTokenRefresh();
+    }
+    return () => stopTokenRefresh();
+  }, [currentUser, autoRefreshEnabled]);
+
+  const handleToggleAutoRefresh = (enabled: boolean) => {
+    setAutoRefreshSetting(enabled);
+    setAutoRefreshEnabledLocal(enabled);
+  };
 
   const createOrUploadBackup = async (dataToSync: JournalEntry[], accessToken: string, existingFileId: string | null) => {
     const mimeType = 'application/json';
@@ -282,7 +303,7 @@ export default function App() {
 
   const handleResolveMerge = async () => {
     if (!syncChoiceData) return;
-    setCloudProgressScreen({ title: 'Merging Chapters', subtitle: 'Analyzing conflict states and generating consolidated cloud backup...' });
+    setCloudProgressScreen({ title: 'Combining entries', subtitle: 'Merging entries from this device and Drive into one backup...' });
     const { accessToken, user, cloudEntries, activeFileId } = syncChoiceData;
     
     // Perform standard conflict-free merge
@@ -303,7 +324,7 @@ export default function App() {
 
   const handleResolveOverwriteRemote = async () => {
     if (!syncChoiceData) return;
-    setCloudProgressScreen({ title: 'Uploading Data', subtitle: 'Overwriting the backup in Google Cloud with your local instance state...' });
+    setCloudProgressScreen({ title: 'Saving to Drive', subtitle: 'Replacing the Drive backup with entries from this device...' });
     const { accessToken, user, activeFileId } = syncChoiceData;
     
     // Upload local entries to Google Drive directly
@@ -317,7 +338,7 @@ export default function App() {
 
   const handleResolveOverwriteLocal = async () => {
     if (!syncChoiceData) return;
-    setCloudProgressScreen({ title: 'Restoring Backup', subtitle: 'Downloading chapters from your Google Drive backup space...' });
+    setCloudProgressScreen({ title: 'Restoring from Drive', subtitle: 'Downloading entries from your Drive backup...' });
     const { accessToken, user, cloudEntries, activeFileId } = syncChoiceData;
     
     // Save cloud entries locally
@@ -342,7 +363,7 @@ export default function App() {
     }
 
     setSyncErrorMessage(null);
-    setCloudProgressScreen({ title: 'Connecting to Google', subtitle: 'Authenticating and establishing secure connection to your personal Google Drive storage. This will take just a moment...' });
+    setCloudProgressScreen({ title: 'Connecting to Google Drive', subtitle: 'Signing in and connecting to your Drive. This will take just a moment...' });
     try {
       const res = await googleSignIn();
       if (res?.accessToken) {
@@ -403,7 +424,7 @@ export default function App() {
   const handleManualSync = async () => {
     if (!driveConnected || !currentUser) return;
     setSyncErrorMessage(null);
-    setCloudProgressScreen({ title: 'Synchronizing', subtitle: 'Fetching remote state from Google Drive...' });
+    setCloudProgressScreen({ title: 'Backing up', subtitle: 'Checking backup on Google Drive...' });
     try {
       const accessToken = await getAccessToken();
       if (!accessToken) throw new Error("No access token available for manual sync");
@@ -451,7 +472,7 @@ export default function App() {
       }
     } catch (err) {
       console.error("Manual sync error:", err);
-      setSyncErrorMessage("Manual sync failed. Please check your connection.");
+      setSyncErrorMessage("Backup failed. Please check your connection.");
     } finally {
       setCloudProgressScreen(null);
     }
@@ -578,7 +599,7 @@ export default function App() {
 
     } catch (err) {
       console.error("Drive sync error:", err);
-      setSyncErrorMessage("Background sync failed. Please check your connection.");
+      setSyncErrorMessage("Backup failed. Please check your connection.");
     } finally {
       setIsSyncingBackground(false);
     }
@@ -764,7 +785,7 @@ export default function App() {
               return [...uniqueImported, ...current];
             });
 
-            alert(`Successfully restored ${verified.length} pages to database!`);
+            alert(`Successfully restored ${verified.length} entries!`);
           } else {
             alert("Format invalid. Backup must be a valid JSON array.");
           }
@@ -820,7 +841,7 @@ export default function App() {
     return (
       <div className="h-[100dvh] w-full bg-zinc-50 flex flex-col gap-3 items-center justify-center font-sans text-xs tracking-wider text-zinc-400 select-none">
         <RefreshCw className="w-5 h-5 text-zinc-300 animate-spin" />
-        <span>Restoring database...</span>
+        <span>Loading your journal...</span>
       </div>
     );
   }
@@ -917,16 +938,16 @@ export default function App() {
               const dirEntries = await loadEntriesFromDirectory(handle);
               if (dirEntries.length > 0) {
                 setEntries(dirEntries);
-                alert(`Loaded ${dirEntries.length} entries from vault.`);
+                alert(`Loaded ${dirEntries.length} entries from folder.`);
               } else {
-                alert(`Vault connected. Found 0 entries.`);
+                alert(`Folder connected. Found 0 entries.`);
               }
             }
           }}
           onDisconnectVault={async () => {
             await disconnectDirectory();
             setDirHandle(null);
-            alert("Disconnected local vault.");
+            alert("Disconnected local folder.");
           }}
           entries={entries}
           activeEntryId={activeEntryId}
@@ -954,6 +975,9 @@ export default function App() {
           onManualSync={handleManualSync}
           driveConnected={driveConnected}
           isSyncingBackground={isSyncingBackground}
+          isRefreshingToken={isRefreshingToken}
+          autoRefreshEnabled={autoRefreshEnabled}
+          onToggleAutoRefresh={handleToggleAutoRefresh}
           syncError={!!syncErrorMessage}
           currentUser={currentUser}
           appPassword={appPassword}
@@ -1130,9 +1154,9 @@ export default function App() {
                   <Cloud className="w-5 h-5" />
                 </div>
                 <div className="flex flex-col gap-1.5 min-w-0">
-                  <h3 className="text-base font-bold tracking-tight">Disconnect Cloud Sync</h3>
+                  <h3 className="text-base font-bold tracking-tight">Disconnect from Drive</h3>
                   <p className="opacity-70 text-[11.5px] leading-relaxed">
-                    Are you sure you want to stop cloud backup? Your journal data remains safe on this device, but automatically syncing changes to Google Drive will pause.
+                    Your entries are safe on this device, but automatic backups to Google Drive will stop.
                   </p>
                 </div>
               </div>
@@ -1158,7 +1182,7 @@ export default function App() {
                   }}
                   className="py-2.5 px-4 rounded-xl text-center font-bold tracking-tight transition-all bg-rose-500 hover:bg-rose-600 active:scale-95 text-white cursor-pointer shadow-sm text-center inline-flex items-center justify-center text-xs"
                 >
-                  Disconnect Sync
+                  Disconnect
                 </button>
               </div>
             </motion.div>
@@ -1188,24 +1212,24 @@ export default function App() {
               style={{ backgroundColor: currentTheme.surface, borderColor: currentTheme.surfaceBorder, color: currentTheme.textPrimary }}
             >
               <div className="flex flex-col gap-1 pr-4">
-                <span className="text-[10px] tracking-widest uppercase opacity-45 font-bold font-mono">Google Cloud Sync</span>
-                <h3 className="text-xl font-bold font-serif tracking-tight">Chapters Alignment Options</h3>
+                <span className="text-[10px] tracking-widest uppercase opacity-45 font-bold font-mono">Google Drive Backup</span>
+                <h3 className="text-xl font-bold font-serif tracking-tight">Choose what to do</h3>
                 <p className="opacity-70 text-xs leading-relaxed mt-1">
-                  Welcome back, <span className="font-semibold">{syncChoiceData.user?.displayName || "Writer"}</span>. We found pre-existing chapters in your Google Drive storage. Choose how you would like to run this device's synchronization:
+                  Welcome back, <span className="font-semibold">{syncChoiceData.user?.displayName || "Writer"}</span>. We found entries in your Google Drive backup. How would you like to proceed?
                 </p>
               </div>
 
               {/* Counts Grid Comparison */}
               <div className="grid grid-cols-2 gap-3 text-center">
                 <div className="rounded-2xl border p-4 flex flex-col items-center gap-0.5" style={{ borderColor: currentTheme.surfaceBorder, backgroundColor: currentTheme.surface }}>
-                  <span className="text-[9px] tracking-wider uppercase opacity-40 font-mono font-bold">Local Device</span>
+                  <span className="text-[9px] tracking-wider uppercase opacity-40 font-mono font-bold">This device</span>
                   <span className="text-2xl font-serif font-black">{syncChoiceData.localCount}</span>
-                  <span className="text-[10px] opacity-60">journal pages</span>
+                  <span className="text-[10px] opacity-60">entries</span>
                 </div>
                 <div className="rounded-2xl border p-4 flex flex-col items-center gap-0.5" style={{ borderColor: currentTheme.surfaceBorder, backgroundColor: currentTheme.surface }}>
-                  <span className="text-[9px] tracking-wider uppercase opacity-40 font-mono font-bold">Google Cloud copy</span>
+                  <span className="text-[9px] tracking-wider uppercase opacity-40 font-mono font-bold">Drive backup</span>
                   <span className="text-2xl font-serif font-black">{syncChoiceData.cloudCount}</span>
-                  <span className="text-[10px] opacity-60">remote pages</span>
+                  <span className="text-[10px] opacity-60">entries</span>
                 </div>
               </div>
 
@@ -1222,13 +1246,13 @@ export default function App() {
                   </div>
                   <div className="flex flex-col gap-0.5">
                     <div className="flex items-center gap-1.5">
-                      <span className="font-bold tracking-tight text-sm">Merge & Combine Entries</span>
+                      <span className="font-bold tracking-tight text-sm">Combine both</span>
                       <span className="px-1.5 py-0.5 rounded-full text-[8px] font-bold tracking-wider uppercase bg-blue-500/10 text-blue-500 font-sans">
                         Recommended
                       </span>
                     </div>
                     <p className="opacity-75 text-[10.5px] leading-relaxed mt-1">
-                      Merges both local and cloud chapters together neatly. If any modifications conflict, the latest edit timestamps win. No data will be lost.
+                      Keep entries from both this device and your Drive backup. If the same entry was edited on both, the newest version is kept.
                     </p>
                   </div>
                 </button>
@@ -1243,9 +1267,9 @@ export default function App() {
                     <ArrowUpFromLine className="w-4.5 h-4.5" />
                   </div>
                   <div className="flex flex-col gap-0.5">
-                    <span className="font-bold tracking-tight text-sm">Upload local chapters</span>
+                    <span className="font-bold tracking-tight text-sm">Replace Drive backup</span>
                     <p className="opacity-75 text-[10.5px] leading-relaxed mt-1">
-                      Replaces the archive in Google Cloud with pages present on this local device. (Local state replaces Cloud backup)
+                      Replace the backup on Drive with entries from this device.
                     </p>
                   </div>
                 </button>
@@ -1260,9 +1284,9 @@ export default function App() {
                     <ArrowDownToLine className="w-4.5 h-4.5" />
                   </div>
                   <div className="flex flex-col gap-0.5">
-                    <span className="font-bold tracking-tight text-sm">Restore from backup</span>
+                    <span className="font-bold tracking-tight text-sm">Restore from Drive backup</span>
                     <p className="opacity-75 text-[10.5px] leading-relaxed mt-1">
-                      Completely replaces local chapters on this device with the chapters present in your cloud backup.
+                      Replace entries on this device with the ones from your Drive backup.
                     </p>
                   </div>
                 </button>
@@ -1278,7 +1302,7 @@ export default function App() {
                   }}
                   className="text-[10px] font-bold tracking-wider uppercase opacity-45 hover:opacity-100 transition-opacity p-2 cursor-pointer"
                 >
-                  {syncChoiceData.isManualSync ? "Cancel manual sync" : "Cancel cloud integration"}
+                  {syncChoiceData.isManualSync ? "Cancel" : "Cancel"}
                 </button>
               </div>
             </motion.div>
@@ -1303,7 +1327,7 @@ export default function App() {
                 <Cloud className="w-4 h-4 text-blue-500 absolute" />
               </div>
               <div className="flex flex-col gap-1.5 min-w-0">
-                <span className="text-[10px] tracking-widest uppercase opacity-45 font-bold font-mono">Google Cloud Sync</span>
+                <span className="text-[10px] tracking-widest uppercase opacity-45 font-bold font-mono">Google Drive Backup</span>
                 <h3 className="text-sm font-bold tracking-tight">{cloudProgressScreen.title}</h3>
                 <p className="opacity-70 text-[11px] leading-relaxed">
                   {cloudProgressScreen.subtitle}

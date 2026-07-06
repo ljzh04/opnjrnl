@@ -423,7 +423,7 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
                 <h3 className="font-sans font-semibold text-xs tracking-wide uppercase">100% privacy & local-first</h3>
               </div>
               <p className="text-xs leading-relaxed opacity-70" style={{ color: theme.textSecondary }}>
-                All written chapters, mood data, tags, and favorites are stored directly inside your browser's local sandbox memory (IndexedDB). No analytics, trackers, or centralized servers ever receive or parse your memories.
+                Everything stays on your device — entries, moods, tags, and favorites. No data is ever sent to any server unless you choose to back up to Google Drive.
               </p>
             </div>
 
@@ -485,7 +485,7 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
             
             <div className="text-xs leading-relaxed flex flex-col gap-3" style={{ color: theme.textSecondary }}>
               <p>
-                To offer cross-device synchronization without hosting any custom cloud databases (which could compromise your private reflections), <strong>opnjrnl</strong> supports an <strong>optional, user-initiated backup integration to your own Google Drive storage</strong>.
+                To let you access your journal across devices without hosting your data on a server, <strong>opnjrnl</strong> supports an <strong>optional backup to your own Google Drive</strong>.
               </p>
               
               <p>
@@ -500,7 +500,7 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
                   <strong>Exclusive purpose:</strong> Access is limited strictly to creating and updating its own hidden configuration and backup data (<code className="font-mono text-[10px] font-bold">opnjrnl_backup.json</code>) inside an application-isolated directory. This folder is managed solely by Google Drive for this app and is completely invisible to other applications and search indexers.
                 </li>
                 <li>
-                  <strong>Self-custody ownership:</strong> Your journal data is transferred securely and directly between your browser database and your personal Google Drive storage space over HTTPS. It is never transmitted, processed, or logged by opnjrnl or any other third-party servers.
+                  <strong>Self-custody ownership:</strong> Your data goes directly between this device and your Google Drive over a secure connection. It is never stored or processed by opnjrnl or any third party.
                 </li>
               </ul>
             </div>

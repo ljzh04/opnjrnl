@@ -56,6 +56,9 @@ interface SidebarProps {
   onManualSync?: () => void;
   driveConnected?: boolean;
   isSyncingBackground?: boolean;
+  isRefreshingToken?: boolean;
+  autoRefreshEnabled?: boolean;
+  onToggleAutoRefresh?: (enabled: boolean) => void;
   syncError?: boolean;
   currentUser?: any;
   appPassword?: string | null;
@@ -95,6 +98,9 @@ const Sidebar = memo(function Sidebar({
   onManualSync,
   driveConnected,
   isSyncingBackground,
+  isRefreshingToken,
+  autoRefreshEnabled,
+  onToggleAutoRefresh,
   syncError,
   currentUser,
   appPassword,
@@ -285,16 +291,18 @@ const Sidebar = memo(function Sidebar({
               {currentUser && (
                 <div 
                   className={`absolute -bottom-0.5 -right-0.5 w-[14px] h-[14px] rounded-full border-[2.5px] border-solid z-10 transition-colors duration-300 ${
-                    !driveConnected
-                      ? 'bg-amber-500' 
-                      : syncError 
-                        ? 'bg-rose-500' 
-                        : isSyncingBackground 
-                          ? 'bg-blue-400 animate-pulse' 
-                          : 'bg-emerald-500'
+                    isRefreshingToken
+                      ? 'bg-purple-400 animate-pulse'
+                      : !driveConnected
+                        ? 'bg-amber-500' 
+                        : syncError 
+                          ? 'bg-rose-500' 
+                          : isSyncingBackground 
+                            ? 'bg-blue-400 animate-pulse' 
+                            : 'bg-emerald-500'
                   }`}
                   style={{ borderColor: theme.surface }}
-                  title={!driveConnected ? "Session Expired" : syncError ? "Sync Error" : isSyncingBackground ? "Syncing..." : "Synced"}
+                  title={isRefreshingToken ? "Reconnecting..." : !driveConnected ? "Disconnected" : syncError ? "Backup failed" : isSyncingBackground ? "Backing up..." : "Backed up"}
                 />
               )}
 
@@ -336,24 +344,56 @@ const Sidebar = memo(function Sidebar({
                             <span className="opacity-60 text-[11px] font-medium break-all">{currentUser.email}</span>
                           </div>
                           
-                          <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full ${!driveConnected ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' : isSyncingBackground ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'} font-bold text-[10px] tracking-wide uppercase mt-1`}>
-                            {!driveConnected ? (
+                          <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full ${
+                            isRefreshingToken
+                              ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400'
+                              : !driveConnected
+                                ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                                : isSyncingBackground
+                                  ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
+                                  : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                          } font-bold text-[10px] tracking-wide uppercase mt-1`}>
+                            {isRefreshingToken ? (
+                              <>
+                                <RefreshCw className="w-3 h-3 animate-spin" />
+                                Reconnecting...
+                              </>
+                            ) : !driveConnected ? (
                               <>
                                 <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
-                                Session Expired
+                                Disconnected
                               </>
                             ) : isSyncingBackground ? (
                               <>
                                 <RefreshCw className="w-3 h-3 animate-spin" />
-                                Syncing to Cloud...
+                                Backing up to Drive...
                               </>
                             ) : (
                               <>
                                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                                Auto-Sync Active
+                                Auto-Backup Active
                               </>
                             )}
                           </div>
+                          
+                          {driveConnected && (
+                            <div
+                              onClick={() => onToggleAutoRefresh?.(!autoRefreshEnabled)}
+                              className="w-full flex items-center justify-between gap-3 py-2.5 px-0.5 cursor-pointer select-none"
+                            >
+                              <div className="flex flex-col gap-0.5 min-w-0">
+                                <span className="text-xs font-bold tracking-tight">Stay Connected</span>
+                                <span className="text-[10px] opacity-60 leading-tight">Keep your Drive connection alive in the background</span>
+                              </div>
+                              <div
+                                className={`relative w-10 h-[22px] rounded-full shrink-0 transition-colors duration-200 ${autoRefreshEnabled ? 'bg-emerald-500' : 'bg-zinc-300 dark:bg-zinc-600'}`}
+                              >
+                                <div
+                                  className={`absolute top-[2px] left-[2px] w-[18px] h-[18px] rounded-full bg-white shadow-sm transition-transform duration-200 ${autoRefreshEnabled ? 'translate-x-[18px]' : ''}`}
+                                />
+                              </div>
+                            </div>
+                          )}
                           
                           <div className="w-full border-t my-2" style={{ borderColor: theme.surfaceBorder }} />
                           
@@ -366,7 +406,7 @@ const Sidebar = memo(function Sidebar({
                               className="w-full py-3 px-4 rounded-xl font-bold tracking-wide transition-all bg-blue-600 hover:bg-blue-700 active:scale-95 text-white cursor-pointer shadow-sm text-center mb-1 flex items-center justify-center gap-2"
                             >
                               <RefreshCw className="w-4 h-4" />
-                              Force Manual Sync
+                              Backup Now
                             </button>
                           ) : (
                             <button
@@ -377,7 +417,7 @@ const Sidebar = memo(function Sidebar({
                               className="w-full py-3 px-4 rounded-xl font-bold tracking-wide transition-all bg-amber-500 hover:bg-amber-600 active:scale-95 text-white cursor-pointer shadow-sm text-center mb-1 flex items-center justify-center gap-2"
                             >
                               <RefreshCw className="w-4 h-4" />
-                              Refresh Session
+                              Reconnect
                             </button>
                           )}
 
@@ -396,7 +436,7 @@ const Sidebar = memo(function Sidebar({
                             }}
                             className="w-full py-3 px-4 rounded-xl font-bold tracking-wide transition-all bg-rose-500 hover:bg-rose-600 active:scale-95 text-white cursor-pointer shadow-sm text-center"
                           >
-                            {driveConnected ? "Disconnect App Sync" : "Sign Out Completely"}
+                            {driveConnected ? "Disconnect from Drive" : "Sign Out"}
                           </button>
                         </div>
                       ) : (
@@ -405,9 +445,9 @@ const Sidebar = memo(function Sidebar({
                             <User className="w-5 h-5 opacity-40" />
                           </div>
                           <div className="flex flex-col gap-1.5 px-1">
-                            <span className="font-bold text-sm tracking-tight">Cloud Secure Sync</span>
+                            <span className="font-bold text-sm tracking-tight">Google Drive Backup</span>
                             <p className="opacity-70 text-[11px] leading-relaxed animate-fade-in">
-                              Sign in with your Google account to automatically back up and sync your chapters to your own personal Google Drive.
+                              Sign in with Google to automatically back up your entries to your own Drive.
                             </p>
                           </div>
                           
@@ -707,9 +747,9 @@ const Sidebar = memo(function Sidebar({
                    style={{ backgroundColor: theme.surface }}
                  >
                    <div className="flex flex-col gap-1 text-left">
-                     <span className="font-semibold tracking-wide text-[13px] text-rose-500">Clear journal database</span>
-                     <p className="opacity-70 text-[11px] leading-relaxed">
-                       Instantly delete all local chapters and preferences. Ensure you have exported a backup if you wish to keep your records.
+                    <span className="font-semibold tracking-wide text-[13px] text-rose-500">Clear all journal data</span>
+                    <p className="opacity-70 text-[11px] leading-relaxed">
+                      Delete all entries and preferences on this device. Export a backup first if you want to keep your records.
                      </p>
                    </div>
                    <button
@@ -741,16 +781,16 @@ const Sidebar = memo(function Sidebar({
                      style={{ borderColor: theme.surfaceBorder }}
                    >
                      <FileDown className="w-5 h-5 opacity-50 mb-1" />
-                     <span className="font-semibold tracking-wide">Export backup</span>
-                     <span className="text-[10px] opacity-50 text-center">Save a .json copy</span>
+                      <span className="font-semibold tracking-wide">Export</span>
+                      <span className="text-[10px] opacity-50 text-center">Save a copy of your journal</span>
                    </button>
                    
                    <label
                      className="flex-1 flex flex-col items-center justify-center gap-2 py-5 px-3 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer interactive-target-44"
                    >
                      <FileUp className="w-5 h-5 opacity-50 mb-1" />
-                     <span className="font-semibold tracking-wide">Import data</span>
-                     <span className="text-[10px] opacity-50 text-center">Restore from .json</span>
+                      <span className="font-semibold tracking-wide">Import</span>
+                      <span className="text-[10px] opacity-50 text-center">Restore from a saved copy</span>
                      <input
                        type="file"
                        accept=".json"
@@ -765,7 +805,7 @@ const Sidebar = memo(function Sidebar({
               <div className="flex flex-col gap-3 mt-4">
                 <div className="flex items-center gap-2 mb-1 px-1">
                   <Folder className="w-3.5 h-3.5 opacity-60" />
-                  <span className="text-[10px] font-bold tracking-widest uppercase opacity-40">Local Vault</span>
+                  <span className="text-[10px] font-bold tracking-widest uppercase opacity-40">Local Folder</span>
                 </div>
                 <div 
                   className="rounded-xl border overflow-hidden flex flex-col"
@@ -807,10 +847,10 @@ const Sidebar = memo(function Sidebar({
               >
                 <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-xs opacity-80">
                   <Cloud className="w-3.5 h-3.5 text-blue-500" />
-                  <span>Google Cloud Safety</span>
+                  <span>Google Drive Privacy</span>
                 </div>
                 <p>
-                  We prioritize your privacy first. Account backups are saved to a secure, hidden application storage folder inside your private Google Drive as <code className="font-mono text-[9px] font-semibold">opnjrnl_backup.json</code>. The application holds strictly restricted permissions and is sandboxed—it cannot view, access, or alter any other files in your personal Drive.
+                  Backups are saved to a hidden folder inside your own Google Drive. The app cannot see, edit, or delete any of your other Drive files.
                 </p>
                 <div className="border-t pt-2 flex items-center justify-between mt-1" style={{ borderColor: theme.surfaceBorder }}>
                   <span>Managed via top-right profile icon</span>
@@ -1034,9 +1074,9 @@ const Sidebar = memo(function Sidebar({
                   <Trash2 className="w-4.5 h-4.5" />
                 </div>
                 <div className="flex flex-col gap-1 min-w-0">
-                  <h3 className="text-sm font-bold tracking-tight">Clear entire database?</h3>
+                  <h3 className="text-sm font-bold tracking-tight">Clear all data?</h3>
                   <p className="opacity-70 text-[10.5px] leading-relaxed">
-                    You are trying to erase your local workspace. Ready to proceed?
+                    This will delete all entries on this device. Ready to proceed?
                   </p>
                 </div>
               </div>
@@ -1081,13 +1121,13 @@ const Sidebar = memo(function Sidebar({
                   <Cloud className="w-4 h-4" />
                 </div>
                 <div className="flex flex-col gap-0.5 min-w-0">
-                  <h3 className="text-xs font-bold uppercase tracking-wider opacity-60">Cloud Sync Safety</h3>
-                  <p className="font-bold text-[13px] leading-none">Choose Deletion Type</p>
+                  <h3 className="text-xs font-bold uppercase tracking-wider opacity-60">Drive Backup Safety</h3>
+                  <p className="font-bold text-[13px] leading-none">Choose what to delete</p>
                 </div>
               </div>
 
               <p className="text-[11px] leading-relaxed opacity-75">
-                Because your device is linked to Google Drive Cloud Sync, an accidental local clear could compromise your cloud backups. Select a migration standard:
+                  Your device is linked to a Drive backup. Choose how to handle it:
               </p>
 
               <div className="flex flex-col gap-2.5">
@@ -1107,9 +1147,9 @@ const Sidebar = memo(function Sidebar({
                     <Cloud className="w-4 h-4" />
                   </div>
                   <div className="flex flex-col gap-0.5 min-w-0">
-                    <span className="text-xs font-bold tracking-tight">1. Keep Cloud Backup Safe</span>
+                    <span className="text-xs font-bold tracking-tight">1. Keep Drive Backup</span>
                     <p className="opacity-65 text-[10px] leading-normal font-normal">
-                      Logs out from Drive & clears entries on this device only. Remote file on Drive remains safe as a backup.
+                      Clears entries on this device only. Your Drive backup stays safe.
                     </p>
                   </div>
                 </button>
@@ -1130,9 +1170,9 @@ const Sidebar = memo(function Sidebar({
                     <Trash2 className="w-4 h-4" />
                   </div>
                   <div className="flex flex-col gap-0.5 min-w-0">
-                    <span className="text-xs font-bold tracking-tight text-rose-500">2. Wipe Device + Cloud Backup</span>
+                    <span className="text-xs font-bold tracking-tight text-rose-500">2. Wipe Device + Drive Backup</span>
                     <p className="opacity-65 text-[10px] leading-normal font-normal">
-                      Permanently wipes local entries AND deletes the `opnjrnl_backup.json` storage file from Google Drive.
+                      Permanently deletes entries on this device AND your Drive backup.
                     </p>
                   </div>
                 </button>
@@ -1174,13 +1214,13 @@ const Sidebar = memo(function Sidebar({
                 </div>
                 <div className="flex flex-col gap-1 min-w-0">
                   <h3 className={`text-sm font-bold tracking-tight ${deleteCloudBackupOption ? 'text-rose-500' : 'text-blue-500'}`}>
-                    {deleteCloudBackupOption ? 'Ultimate Cloud & Local Purge' : 'Confirm Local Base Wipe'}
+                    {deleteCloudBackupOption ? 'Delete everything?' : 'Delete local data?'}
                   </h3>
                   <p className="opacity-75 text-[10.5px] leading-relaxed">
                     {deleteCloudBackupOption ? (
-                      "This action is absolutely permanent and cannot be undone. All local folders AND your opnjrnl_backup.json cloud file will be deleted. Are you 100% sure?"
+                      "This cannot be undone. All entries on this device AND your Drive backup will be deleted. Are you sure?"
                     ) : (
-                      "This will wipe all local chapters, setting configurations, and credentials on this device. Your remote database in Google Drive is safe and will not be affected. Ready to execute?"
+                      "This will delete all entries and settings on this device. Your Drive backup is not affected. Ready?"
                     )}
                   </p>
                 </div>
