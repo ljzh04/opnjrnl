@@ -73,6 +73,12 @@ export default function App() {
   const [activeEntryId, setActiveEntryId] = useState<string | null>(null);
   const [lastKnownEntry, setLastKnownEntry] = useState<JournalEntry | null>(null);
 
+  const entriesRef = useRef<JournalEntry[]>(entries);
+  entriesRef.current = entries;
+  const dirHandleRef = useRef<any>(dirHandle);
+  dirHandleRef.current = dirHandle;
+  const isDataReadyRef = useRef(false);
+
   useEffect(() => {
     if (activeEntryId) {
       const entry = entries.find(e => e.id === activeEntryId);
@@ -180,26 +186,29 @@ export default function App() {
       get<{ notificationsEnabled: boolean, notificationTime: string }>(APP_SETTINGS_KEY),
       getSavedDirectoryHandleInfo()
     ]).then(async ([storedEntries, storedThemeId, storedPassword, storedSyslock, storedSettings, dirHandleInfo]) => {
+      const polished = (storedEntries || []).map(entry => ({
+        ...entry,
+        tags: entry.tags || []
+      }));
+
       if (dirHandleInfo) {
         setDirHandle(dirHandleInfo.handle);
         if (!dirHandleInfo.requiresPermission) {
-          const dirEntries = await loadEntriesFromDirectory(dirHandleInfo.handle);
-          setEntries(dirEntries);
-        } else {
-          // Requires permission, let UI prompt, load IDB fallback for now
-          if (storedEntries) {
-            const polished = storedEntries.map(entry => ({
-              ...entry,
-              tags: entry.tags || []
-            }));
-            setEntries(polished);
+          try {
+            const dirEntries = await loadEntriesFromDirectory(dirHandleInfo.handle);
+            if (dirEntries.length > 0) {
+              const merged = mergeEntries(polished, dirEntries);
+              setEntries(merged);
+            } else if (polished.length > 0) {
+              setEntries(polished);
+            }
+          } catch {
+            if (polished.length > 0) setEntries(polished);
           }
+        } else {
+          if (polished.length > 0) setEntries(polished);
         }
-      } else if (storedEntries) {
-        const polished = storedEntries.map(entry => ({
-          ...entry,
-          tags: entry.tags || []
-        }));
+      } else if (polished.length > 0) {
         setEntries(polished);
       }
       if (storedThemeId && MINIMAL_THEMES[storedThemeId]) {
@@ -217,6 +226,7 @@ export default function App() {
         setNotificationsEnabled(storedSettings.notificationsEnabled);
         setNotificationTime(storedSettings.notificationTime || "20:00");
       }
+      isDataReadyRef.current = true;
       setIsLoaded(true);
     }).catch((err) => {
       console.error("Storage load error:", err);
@@ -259,6 +269,33 @@ export default function App() {
   const handleToggleAutoRefresh = (enabled: boolean) => {
     setAutoRefreshSetting(enabled);
     setAutoRefreshEnabledLocal(enabled);
+  };
+
+  const findDriveBackupFile = async (accessToken: string): Promise<string | null> => {
+    const fileQ = encodeURIComponent("name = 'opnjrnl_backup.json' and trashed = false");
+    const fileRes = await fetch(`https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${fileQ}&fields=files(id)`, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    const fileData = await fileRes.json();
+    if (fileData.files && fileData.files.length > 0) {
+      return fileData.files[0].id;
+    }
+    return null;
+  };
+
+  const downloadDriveBackup = async (accessToken: string, fileId: string): Promise<JournalEntry[] | null> => {
+    try {
+      const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) return data;
+      }
+    } catch (e) {
+      console.warn("Failed to download Drive backup:", e);
+    }
+    return null;
   };
 
   const createOrUploadBackup = async (dataToSync: JournalEntry[], accessToken: string, existingFileId: string | null) => {
@@ -306,14 +343,11 @@ export default function App() {
     setCloudProgressScreen({ title: 'Combining entries', subtitle: 'Merging entries from this device and Drive into one backup...' });
     const { accessToken, user, cloudEntries, activeFileId } = syncChoiceData;
     
-    // Perform standard conflict-free merge
-    const merged = mergeEntries(entries, cloudEntries);
+    const merged = mergeEntries(entriesRef.current, cloudEntries);
     
-    // Update local state and IndexedDB
     setEntries(merged);
     await set(ENTRIES_STORAGE_KEY, merged);
     
-    // Upload consolidated data to Drive
     await createOrUploadBackup(merged, accessToken, activeFileId);
     
     setDriveConnected(true);
@@ -327,8 +361,7 @@ export default function App() {
     setCloudProgressScreen({ title: 'Saving to Drive', subtitle: 'Replacing the Drive backup with entries from this device...' });
     const { accessToken, user, activeFileId } = syncChoiceData;
     
-    // Upload local entries to Google Drive directly
-    await createOrUploadBackup(entries, accessToken, activeFileId);
+    await createOrUploadBackup(entriesRef.current, accessToken, activeFileId);
     
     setDriveConnected(true);
     setCurrentUser(user);
@@ -369,31 +402,11 @@ export default function App() {
       if (res?.accessToken) {
         const accessToken = res.accessToken;
         
-        // Find existing backup file inside Drive isolated AppData space
-        const fileQ = encodeURIComponent("name = 'opnjrnl_backup.json' and trashed = false");
-        const fileRes = await fetch(`https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${fileQ}&fields=files(id)`, {
-          headers: { Authorization: `Bearer ${accessToken}` }
-        });
-        const fileData = await fileRes.json();
-        
-        let activeFileId: string | null = null;
+        const activeFileId = await findDriveBackupFile(accessToken);
         let cloudEntries: JournalEntry[] = [];
         
-        if (fileData.files && fileData.files.length > 0) {
-          activeFileId = fileData.files[0].id;
-          try {
-            const downloadRes = await fetch(`https://www.googleapis.com/drive/v3/files/${activeFileId}?alt=media`, {
-              headers: { Authorization: `Bearer ${accessToken}` }
-            });
-            if (downloadRes.ok) {
-              const fetched = await downloadRes.json();
-              if (Array.isArray(fetched)) {
-                cloudEntries = fetched;
-              }
-            }
-          } catch (e) {
-            console.warn("Failed to download existing Drive backup:", e);
-          }
+        if (activeFileId) {
+          cloudEntries = await downloadDriveBackup(accessToken, activeFileId) || [];
         }
         
         // If there's a pre-existing backup with entries, show user management option dialog
@@ -401,14 +414,14 @@ export default function App() {
           setSyncChoiceData({
             accessToken,
             user: res.user,
-            localCount: entries.length,
+            localCount: entriesRef.current.length,
             cloudCount: cloudEntries.length,
             cloudEntries,
             activeFileId
           });
         } else {
           // No cloud content or new account. Direct upload local state & connect
-          await createOrUploadBackup(entries, accessToken, activeFileId);
+          await createOrUploadBackup(entriesRef.current, accessToken, activeFileId);
           setDriveConnected(true);
           setCurrentUser(res.user);
         }
@@ -429,31 +442,11 @@ export default function App() {
       const accessToken = await getAccessToken();
       if (!accessToken) throw new Error("No access token available for manual sync");
       
-      const fileQ = encodeURIComponent("name = 'opnjrnl_backup.json' and trashed = false");
-      const fileRes = await fetch(`https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${fileQ}&fields=files(id)`, {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      });
-      if (!fileRes.ok) throw new Error("Failed to search Drive space");
-      const fileData = await fileRes.json();
-      
-      let activeFileId: string | null = null;
+      const activeFileId = await findDriveBackupFile(accessToken);
       let cloudEntries: JournalEntry[] = [];
       
-      if (fileData.files && fileData.files.length > 0) {
-        activeFileId = fileData.files[0].id;
-        try {
-          const downloadRes = await fetch(`https://www.googleapis.com/drive/v3/files/${activeFileId}?alt=media`, {
-            headers: { Authorization: `Bearer ${accessToken}` }
-          });
-          if (downloadRes.ok) {
-            const fetched = await downloadRes.json();
-            if (Array.isArray(fetched)) {
-              cloudEntries = fetched;
-            }
-          }
-        } catch (e) {
-          console.warn("Failed to download existing Drive backup during manual sync:", e);
-        }
+      if (activeFileId) {
+        cloudEntries = await downloadDriveBackup(accessToken, activeFileId) || [];
       }
       
       // If we found remote entries, pop the choices dialog. Otherwise just push local state.
@@ -461,14 +454,14 @@ export default function App() {
         setSyncChoiceData({
           accessToken,
           user: currentUser,
-          localCount: entries.length,
+          localCount: entriesRef.current.length,
           cloudCount: cloudEntries.length,
           cloudEntries,
           activeFileId,
           isManualSync: true
         });
       } else {
-        await createOrUploadBackup(entries, accessToken, activeFileId);
+        await createOrUploadBackup(entriesRef.current, accessToken, activeFileId);
       }
     } catch (err) {
       console.error("Manual sync error:", err);
@@ -486,21 +479,7 @@ export default function App() {
     setIsSyncingBackground(true);
     try {
       let fileId = await get<string>(DRIVE_FILE_ID_KEY);
-      const dataStr = JSON.stringify(dataToSync);
       const mimeType = 'application/json';
-
-      // Helper to find the backup file inside the isolated appDataFolder space
-      const findFileInAppData = async (): Promise<string | null> => {
-        const fileQ = encodeURIComponent("name = 'opnjrnl_backup.json' and trashed = false");
-        const fileRes = await fetch(`https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${fileQ}&fields=files(id)`, {
-          headers: { Authorization: `Bearer ${accessToken}` }
-        });
-        const fileData = await fileRes.json();
-        if (fileData.files && fileData.files.length > 0) {
-          return fileData.files[0].id;
-        }
-        return null;
-      };
 
       // 1. Direct short-circuit if we have cached ID and are not performing full merges
       if (fileId && !forceFetchFirst) {
@@ -511,53 +490,41 @@ export default function App() {
               Authorization: `Bearer ${accessToken}`,
               'Content-Type': mimeType
             },
-            body: dataStr
+            body: JSON.stringify(dataToSync)
           });
           if (updateRes.status === 200 || updateRes.status === 204) {
-            return; // Success
+            return;
           }
           if (updateRes.status === 404) {
-            fileId = null; // Stale ID, fall through to resolve
+            fileId = null;
           }
         } catch (e) {
           console.warn("Direct patch update failed, running full resolution pattern", e);
         }
       }
 
-      // 2. Resolve active backup file ID from application isolated space
-      const activeFileId = fileId || await findFileInAppData();
+      // 2. Resolve active backup file ID
+      const activeFileId = fileId || await findDriveBackupFile(accessToken);
 
       if (activeFileId) {
-        if (forceFetchFirst) {
-          try {
-            const downloadRes = await fetch(`https://www.googleapis.com/drive/v3/files/${activeFileId}?alt=media`, {
-              headers: { Authorization: `Bearer ${accessToken}` }
+        // If local data is empty but cloud has data, always merge to prevent data loss
+        const shouldMerge = forceFetchFirst || dataToSync.length === 0;
+        if (shouldMerge) {
+          const cloudEntries = await downloadDriveBackup(accessToken, activeFileId);
+          if (cloudEntries && cloudEntries.length > 0) {
+            const merged = mergeEntries(dataToSync, cloudEntries);
+            setEntries(merged);
+            set(ENTRIES_STORAGE_KEY, merged).catch(console.error);
+            await fetch(`https://www.googleapis.com/upload/drive/v3/files/${activeFileId}?uploadType=media`, {
+              method: 'PATCH',
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+                'Content-Type': mimeType
+              },
+              body: JSON.stringify(merged)
             });
-            if (downloadRes.ok) {
-              const cloudEntries = await downloadRes.json();
-              if (Array.isArray(cloudEntries)) {
-                // Perform two-way conflict-free merge
-                const merged = mergeEntries(dataToSync, cloudEntries);
-                
-                // Write merged results back to current browser state
-                setEntries(merged);
-                
-                // Update remote backup file inside the hidden appDataFolder with merged data
-                await fetch(`https://www.googleapis.com/upload/drive/v3/files/${activeFileId}?uploadType=media`, {
-                  method: 'PATCH',
-                  headers: {
-                    Authorization: `Bearer ${accessToken}`,
-                    'Content-Type': mimeType
-                  },
-                  body: JSON.stringify(merged)
-                });
-                
-                await set(DRIVE_FILE_ID_KEY, activeFileId);
-                return;
-              }
-            }
-          } catch (err) {
-            console.error("Could not fetch or merge pre-existing backup indices on Drive:", err);
+            await set(DRIVE_FILE_ID_KEY, activeFileId);
+            return;
           }
         }
 
@@ -568,32 +535,34 @@ export default function App() {
             Authorization: `Bearer ${accessToken}`,
             'Content-Type': mimeType
           },
-          body: dataStr
+          body: JSON.stringify(dataToSync)
         });
         await set(DRIVE_FILE_ID_KEY, activeFileId);
 
       } else {
-        // Create new backup file inside the isolated appDataFolder parents list
-        const metadata = {
-          name: 'opnjrnl_backup.json',
-          mimeType,
-          parents: ['appDataFolder']
-        };
+        // No backup exists yet, only create if we have data to upload
+        if (dataToSync.length > 0) {
+          const metadata = {
+            name: 'opnjrnl_backup.json',
+            mimeType,
+            parents: ['appDataFolder']
+          };
 
-        const form = new FormData();
-        form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-        form.append('file', new Blob([dataStr], { type: mimeType }));
+          const form = new FormData();
+          form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+          form.append('file', new Blob([JSON.stringify(dataToSync)], { type: mimeType }));
 
-        const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: form
-        });
-        const createdFile = await res.json();
-        if (createdFile.id) {
-          await set(DRIVE_FILE_ID_KEY, createdFile.id);
+          const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: form
+          });
+          const createdFile = await res.json();
+          if (createdFile.id) {
+            await set(DRIVE_FILE_ID_KEY, createdFile.id);
+          }
         }
       }
 
@@ -607,15 +576,15 @@ export default function App() {
 
   // Sync entries to storage
   useEffect(() => {
-    if (isLoaded) {
+    if (isLoaded && isDataReadyRef.current) {
       set(ENTRIES_STORAGE_KEY, entries).catch(console.error);
 
-      // Debounced Drive Sync
+      // Debounced Drive Sync — always merge-first to prevent overwriting cloud with stale local data
       if (driveConnected) {
         if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
         syncTimeoutRef.current = setTimeout(() => {
-          syncToDrive(entries);
-        }, 10000); // Wait 10s of quiet time before uploading a backup
+          syncToDrive(entriesRef.current, null, true);
+        }, 10000);
       }
     }
   }, [entries, isLoaded, driveConnected]);
@@ -654,27 +623,28 @@ export default function App() {
       updatedAt: Date.now(),
       tags: [],
     };
-    setEntries(current => {
-      if (dirHandle) saveEntryToDirectory(dirHandle, newEntry);
-      return [newEntry, ...current];
-    });
+    const currentHandle = dirHandleRef.current;
+    setEntries(current => [newEntry, ...current]);
+    if (currentHandle) saveEntryToDirectory(currentHandle, newEntry);
     setActiveEntryId(newEntry.id);
   };
 
   const handleUpdateEntry = useCallback((id: string, updates: Partial<JournalEntry>) => {
+    const currentHandle = dirHandleRef.current;
     setEntries(current => {
       const newEntries = current.map(entry =>
         entry.id === id ? { ...entry, ...updates } : entry
       );
-      if (dirHandle) {
+      if (currentHandle) {
         const updatedEntry = newEntries.find(e => e.id === id);
-        if (updatedEntry) saveEntryToDirectory(dirHandle, updatedEntry);
+        if (updatedEntry) saveEntryToDirectory(currentHandle, updatedEntry);
       }
       return newEntries;
     });
-  }, [dirHandle]);
+  }, []);
 
   const handleDeleteEntry = useCallback((id: string) => {
+    const currentHandle = dirHandleRef.current;
     setEntries(current => {
       const entryToDelete = current.find(e => e.id === id);
       if (entryToDelete) {
@@ -684,14 +654,14 @@ export default function App() {
           setDeletedEntryState(null);
         }, 10000);
       }
-      if (dirHandle) {
-        deleteEntryFromDirectory(dirHandle, id);
+      if (currentHandle) {
+        deleteEntryFromDirectory(currentHandle, id);
       }
       return current.filter(entry => entry.id !== id);
     });
 
     setActiveEntryId(current => (current === id ? null : current));
-  }, [dirHandle]);
+  }, []);
 
   const handleUndoDelete = (e?: any) => {
     if (e) {
@@ -699,10 +669,9 @@ export default function App() {
       e.stopPropagation();
     }
     if (deletedEntryState) {
-      setEntries(current => {
-        if (dirHandle) saveEntryToDirectory(dirHandle, deletedEntryState.entry);
-        return [deletedEntryState.entry, ...current].sort((a, b) => b.createdAt - a.createdAt);
-      });
+      const currentHandle = dirHandleRef.current;
+      setEntries(current => [deletedEntryState.entry, ...current].sort((a, b) => b.createdAt - a.createdAt));
+      if (currentHandle) saveEntryToDirectory(currentHandle, deletedEntryState.entry);
       clearUndoState();
     }
   };
@@ -763,7 +732,6 @@ export default function App() {
         try {
           const imported = JSON.parse(event.target?.result as string);
           if (Array.isArray(imported)) {
-            // Validate basic schema for items
             const verified: JournalEntry[] = imported.map((item: any) => {
               return {
                 id: item.id || uuidv4(),
@@ -778,14 +746,27 @@ export default function App() {
               };
             });
 
-            // Merge with existing entries (avoid duplicates by ID)
+            let importedCount = 0;
             setEntries(current => {
               const existingIds = new Set(current.map(c => c.id));
-              const uniqueImported = verified.filter(v => !existingIds.has(v.id));
+              const uniqueImported = verified.filter(v => {
+                if (!existingIds.has(v.id)) {
+                  importedCount++;
+                  return true;
+                }
+                return false;
+              });
               return [...uniqueImported, ...current];
             });
 
-            alert(`Successfully restored ${verified.length} entries!`);
+            const currentHandle = dirHandleRef.current;
+            if (currentHandle) {
+              for (const entry of verified) {
+                saveEntryToDirectory(currentHandle, entry);
+              }
+            }
+
+            alert(`Successfully restored ${importedCount} entries!`);
           } else {
             alert("Format invalid. Backup must be a valid JSON array.");
           }
