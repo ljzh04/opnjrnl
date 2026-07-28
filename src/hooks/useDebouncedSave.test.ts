@@ -80,7 +80,6 @@ it('cancels save when content changes within delay', () => {
 
 it('cancels save when entry becomes null', () => {
   const onUpdate = vi.fn();
-
   const { rerender } = renderHook(
     ({ entry }) => useDebouncedSave(entry, 'T', '', onUpdate, 600),
     { initialProps: { entry: makeEntry('e1') } },
@@ -90,17 +89,60 @@ it('cancels save when entry becomes null', () => {
 
   rerender({ entry: null });
 
-  act(() => { vi.advanceTimersByTime(600); });
-
-  expect(onUpdate).not.toHaveBeenCalled();
+  // ponytail: flush on entry change — saves e1's state before switching away
+  expect(onUpdate).toHaveBeenCalledTimes(1);
+  expect(onUpdate).toHaveBeenCalledWith('e1', {
+    title: 'T',
+    content: '',
+    updatedAt: expect.any(Number),
+  });
 });
 
 it('does not fire when entry is null from the start', () => {
   const onUpdate = vi.fn();
-
   renderHook(() => useDebouncedSave(null, 'T', '', onUpdate, 600));
-
   act(() => { vi.advanceTimersByTime(600); });
-
   expect(onUpdate).not.toHaveBeenCalled();
+});
+
+it('flushes pending edits when switching entries within delay', () => {
+  const onUpdate = vi.fn();
+  const entry1 = makeEntry('e1');
+  const entry2 = makeEntry('e2');
+
+  const { rerender } = renderHook(
+    ({ entry, title }) => useDebouncedSave(entry, title, '', onUpdate, 600),
+    { initialProps: { entry: entry1, title: 'Draft' } },
+  );
+
+  // User types, then clicks away before debounce fires
+  act(() => { vi.advanceTimersByTime(300); });
+  rerender({ entry: entry2, title: '' });
+
+  // e1's state should be flushed immediately
+  expect(onUpdate).toHaveBeenCalledTimes(1);
+  expect(onUpdate).toHaveBeenCalledWith('e1', {
+    title: 'Draft',
+    content: '',
+    updatedAt: expect.any(Number),
+  });
+});
+
+it('skips flush if debounce already saved same values', () => {
+  const onUpdate = vi.fn();
+  const entry1 = makeEntry('e1');
+  const entry2 = makeEntry('e2');
+
+  const { rerender } = renderHook(
+    ({ entry, title }) => useDebouncedSave(entry, title, '', onUpdate, 600),
+    { initialProps: { entry: entry1, title: 'Final' } },
+  );
+
+  // Debounce fires — saves e1
+  act(() => { vi.advanceTimersByTime(600); });
+  expect(onUpdate).toHaveBeenCalledTimes(1);
+
+  // Switch entries — flush should skip (debounce already saved these values)
+  rerender({ entry: entry2, title: '' });
+  expect(onUpdate).toHaveBeenCalledTimes(1);
 });

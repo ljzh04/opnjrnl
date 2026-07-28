@@ -85,6 +85,8 @@ export default function App() {
     if (activeEntryId) {
       const entry = entries.find(e => e.id === activeEntryId);
       if (entry) setLastKnownEntry(entry);
+    } else {
+      setLastKnownEntry(null);
     }
   }, [activeEntryId, entries]);
 
