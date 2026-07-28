@@ -51,6 +51,8 @@ interface SidebarProps {
   onToggleFavorites: () => void;
   onExport: () => void;
   onImport: (e: ChangeEvent<HTMLInputElement>) => void;
+  onRestoreFromArchive?: () => void;
+  onRestoreFromLocalArchive?: () => void;
   onClearAllData?: (options?: { deleteCloudBackup?: boolean }) => void;
   onConnectDrive?: () => void;
   onManualSync?: () => void;
@@ -93,6 +95,8 @@ const Sidebar = memo(function Sidebar({
   onToggleFavorites,
   onExport,
   onImport,
+  onRestoreFromArchive,
+  onRestoreFromLocalArchive,
   onClearAllData,
   onConnectDrive,
   onManualSync,
@@ -768,40 +772,65 @@ const Sidebar = memo(function Sidebar({
                  </div>
                </div>
 
-               {/* Data Import/Export */}
-               <div className="flex flex-col gap-3">
-                 <span className="text-[10px] font-bold tracking-widest uppercase opacity-40">Local data</span>
-                 <div 
-                   className="rounded-xl border flex flex-col sm:flex-row shadow-sm overflow-hidden text-xs"
-                   style={{ borderColor: theme.surfaceBorder, backgroundColor: theme.surface }}
-                 >
-                   <button
-                     onClick={onExport}
-                     className="flex-1 flex flex-col items-center justify-center gap-2 py-5 px-3 hover:bg-black/5 dark:hover:bg-white/5 border-b sm:border-b-0 sm:border-r cursor-pointer interactive-target-44"
-                     style={{ borderColor: theme.surfaceBorder }}
-                   >
-                     <FileDown className="w-5 h-5 opacity-50 mb-1" />
+{/* Data Import/Export & Restore */}
+                <div className="flex flex-col gap-3">
+                  <span className="text-[10px] font-bold tracking-widest uppercase opacity-40">Local data</span>
+                  <div 
+                    className="rounded-xl border flex flex-col sm:flex-row shadow-sm overflow-hidden text-xs"
+                    style={{ borderColor: theme.surfaceBorder, backgroundColor: theme.surface }}
+                  >
+                    <button
+                      onClick={onExport}
+                      className="flex-1 flex flex-col items-center justify-center gap-2 py-5 px-3 hover:bg-black/5 dark:hover:bg-white/5 border-b sm:border-b-0 sm:border-r cursor-pointer interactive-target-44"
+                      style={{ borderColor: theme.surfaceBorder }}
+                    >
+                      <FileDown className="w-5 h-5 opacity-50 mb-1" />
                       <span className="font-semibold tracking-wide">Export</span>
                       <span className="text-[10px] opacity-50 text-center">Save a copy of your journal</span>
-                   </button>
-                   
-                   <label
-                     className="flex-1 flex flex-col items-center justify-center gap-2 py-5 px-3 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer interactive-target-44"
-                   >
-                     <FileUp className="w-5 h-5 opacity-50 mb-1" />
+                    </button>
+                    <label
+                      className="flex-1 flex flex-col items-center justify-center gap-2 py-5 px-3 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer interactive-target-44"
+                    >
+                      <FileUp className="w-5 h-5 opacity-50 mb-1" />
                       <span className="font-semibold tracking-wide">Import</span>
                       <span className="text-[10px] opacity-50 text-center">Restore from a saved copy</span>
-                     <input
-                       type="file"
-                       accept=".json"
-                       onChange={onImport}
-                       className="hidden"
-                     />
-                   </label>
-                 </div>
-               </div>
+                      <input
+                        type="file"
+                        accept=".json"
+                        onChange={onImport}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
 
-              {/* Native Vault Directory Settings */}
+                  <div 
+                    className="rounded-xl border flex flex-col sm:flex-row shadow-sm overflow-hidden text-xs"
+                    style={{ borderColor: theme.surfaceBorder, backgroundColor: theme.surface }}
+                  >
+                    {driveConnected && (
+                      <button
+                        onClick={onRestoreFromArchive}
+                        className="flex-1 flex flex-col items-center justify-center gap-2 py-5 px-3 hover:bg-black/5 dark:hover:bg-white/5 border-b sm:border-b-0 sm:border-r cursor-pointer interactive-target-44"
+                        style={{ borderColor: theme.surfaceBorder }}
+                      >
+                        <FileDown className="w-5 h-5 opacity-50 mb-1" />
+                        <span className="font-semibold tracking-wide">Drive archive</span>
+                        <span className="text-[10px] opacity-50 text-center">Recover previous backup state</span>
+                      </button>
+                    )}
+                    <button
+                      onClick={onRestoreFromLocalArchive}
+                      className="flex-1 flex flex-col items-center justify-center gap-2 py-5 px-3 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer interactive-target-44"
+                      style={{ borderColor: theme.surfaceBorder }}
+                    >
+                      <FileUp className="w-5 h-5 opacity-50 mb-1" />
+                      <span className="font-semibold tracking-wide">Local archive</span>
+                      <span className="text-[10px] opacity-50 text-center">Recover entries deleted from this device</span>
+                    </button>
+                  </div>
+                </div>
+
+               {/* Native Vault Directory Settings */}
               <div className="flex flex-col gap-3 mt-4">
                 <div className="flex items-center gap-2 mb-1 px-1">
                   <Folder className="w-3.5 h-3.5 opacity-60" />

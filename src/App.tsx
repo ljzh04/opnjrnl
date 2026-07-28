@@ -24,6 +24,8 @@ const DRIVE_FILE_ID_KEY = 'minimal-journal-drive-file-id';
 const APP_PASSWORD_KEY = 'minimal-journal-password';
 const APP_SYSLOCK_KEY = 'minimal-journal-syslock';
 const APP_SETTINGS_KEY = 'minimal-journal-settings';
+const ARCHIVE_FILE_NAME = 'opnjrnl_archive.json';
+const LOCAL_ARCHIVE_KEY = 'minimal-journal-local-archive';
 
 const triggerNotification = async (title: string, body: string) => {
   if (!("Notification" in window)) return;
@@ -132,6 +134,7 @@ export default function App() {
     isManualSync?: boolean;
   } | null>(null);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const syncInProgressRef = useRef(false);
   const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const clearUndoState = () => {
@@ -298,7 +301,49 @@ export default function App() {
     return null;
   };
 
+  const findDriveFileByName = async (accessToken: string, name: string): Promise<string | null> => {
+    const q = encodeURIComponent(`name = '${name}' and trashed = false`);
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${q}&fields=files(id)`, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    const data = await res.json();
+    return data.files?.[0]?.id || null;
+  };
+
+  const archiveEntries = async (accessToken: string, entries: JournalEntry[]): Promise<void> => {
+    const archiveFileId = await findDriveFileByName(accessToken, ARCHIVE_FILE_NAME);
+    const payload = JSON.stringify(entries);
+    if (archiveFileId) {
+      await fetch(`https://www.googleapis.com/upload/drive/v3/files/${archiveFileId}?uploadType=media`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: payload
+      });
+    } else {
+      const metadata = { name: ARCHIVE_FILE_NAME, mimeType: 'application/json', parents: ['appDataFolder'] };
+      const form = new FormData();
+      form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+      form.append('file', new Blob([payload], { type: 'application/json' }));
+      await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: form
+      });
+    }
+  };
+
   const createOrUploadBackup = async (dataToSync: JournalEntry[], accessToken: string, existingFileId: string | null) => {
+    // ponytail: archives previous cloud state to Drive before overwriting
+    if (existingFileId) {
+      try {
+        const currentCloud = await downloadDriveBackup(accessToken, existingFileId);
+        if (currentCloud && currentCloud.length > 0) {
+          await archiveEntries(accessToken, currentCloud);
+        }
+      } catch (e) {
+        console.warn('Archive save skipped:', e);
+      }
+    }
     const mimeType = 'application/json';
     const dataStr = JSON.stringify(dataToSync);
     
@@ -472,8 +517,11 @@ export default function App() {
   };
 
   const syncToDrive = async (dataToSync: JournalEntry[], token?: string | null, forceFetchFirst = false) => {
+    // ponytail: global lock, per-account locks if concurrent writes become an issue
+    if (syncInProgressRef.current) { console.warn('Sync already in progress, skipping'); return; }
+    syncInProgressRef.current = true;
     const accessToken = token || await getAccessToken();
-    if (!accessToken) return;
+    if (!accessToken) { syncInProgressRef.current = false; return; }
 
     setSyncErrorMessage(null);
     setIsSyncingBackground(true);
@@ -570,6 +618,7 @@ export default function App() {
       console.error("Drive sync error:", err);
       setSyncErrorMessage("Backup failed. Please check your connection.");
     } finally {
+      syncInProgressRef.current = false;
       setIsSyncingBackground(false);
     }
   };
@@ -644,6 +693,7 @@ export default function App() {
   }, []);
 
   const handleDeleteEntry = useCallback((id: string) => {
+    set(LOCAL_ARCHIVE_KEY, entriesRef.current).catch(console.error);
     const currentHandle = dirHandleRef.current;
     setEntries(current => {
       const entryToDelete = current.find(e => e.id === id);
@@ -677,6 +727,7 @@ export default function App() {
   };
 
   const handleClearAllData = async (options?: { deleteCloudBackup?: boolean }) => {
+    set(LOCAL_ARCHIVE_KEY, entriesRef.current).catch(console.error);
     if (syncTimeoutRef.current) {
       clearTimeout(syncTimeoutRef.current);
       syncTimeoutRef.current = null;
@@ -774,6 +825,42 @@ export default function App() {
           alert("Failed to parse backup file: " + err);
         }
       };
+    }
+  };
+
+  const handleRestoreFromArchive = async () => {
+    if (!driveConnected) { alert('Connect to Google Drive first.'); return; }
+    if (!confirm('Restore entries from Drive archive? This replaces all local entries with the archived state.')) return;
+    setCloudProgressScreen({ title: 'Restoring from archive', subtitle: 'Downloading archive backup from Drive...' });
+    try {
+      const token = await getAccessToken();
+      if (!token) throw new Error('No token');
+      const id = await findDriveFileByName(token, ARCHIVE_FILE_NAME);
+      if (!id) { alert('No archive found on Drive.'); return; }
+      const data = await downloadDriveBackup(token, id);
+      if (!data || data.length === 0) { alert('Archive is empty.'); return; }
+      setEntries(data);
+      await set(ENTRIES_STORAGE_KEY, data);
+      alert(`Restored ${data.length} entries from archive.`);
+    } catch (e) {
+      console.error(e);
+      setSyncErrorMessage('Failed to restore from archive.');
+    } finally {
+      setCloudProgressScreen(null);
+    }
+  };
+
+  const handleRestoreFromLocalArchive = async () => {
+    try {
+      const archived = await get<JournalEntry[]>(LOCAL_ARCHIVE_KEY);
+      if (!archived || archived.length === 0) { alert('No local archive found.'); return; }
+      if (!confirm(`Restore ${archived.length} entries from local archive? This replaces all current entries.`)) return;
+      setEntries(archived);
+      await set(ENTRIES_STORAGE_KEY, archived);
+      alert(`Restored ${archived.length} entries from local archive.`);
+    } catch (e) {
+      console.error(e);
+      alert('Failed to restore from local archive.');
     }
   };
 
@@ -951,6 +1038,8 @@ export default function App() {
           onToggleFavorites={() => setShowFavoritesOnly(!showFavoritesOnly)}
           onExport={handleExportData}
           onImport={handleImportData}
+          onRestoreFromArchive={handleRestoreFromArchive}
+          onRestoreFromLocalArchive={handleRestoreFromLocalArchive}
           onClearAllData={handleClearAllData}
           onConnectDrive={handleConnectDrive}
           onManualSync={handleManualSync}
