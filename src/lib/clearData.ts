@@ -8,6 +8,8 @@ export interface ClearDataDeps {
   appPasswordDel: () => Promise<void>;
   syslockDel: () => Promise<void>;
   localStorageRemoveItem: (key: string) => void;
+  encSaltDel?: () => Promise<void>;
+  encVerifyDel?: () => Promise<void>;
 }
 
 export async function clearData(
@@ -50,6 +52,8 @@ export async function clearData(
     await deps.entriesDel();
     await deps.appPasswordDel();
     await deps.syslockDel();
+    await deps.encSaltDel?.();
+    await deps.encVerifyDel?.();
   } catch {}
 
   deps.localStorageRemoveItem('patched-commit-sha');

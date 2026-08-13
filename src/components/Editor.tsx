@@ -311,7 +311,8 @@ const Editor = memo(function Editor({ entry, onUpdate, onDelete, theme, allUserT
   // Fixed and robust Clipboard copy functionality (with foolproof fallback for sandbox iframes)
   const shareEntry = async () => {
     if (!entry) return;
-    const textToCopy = `${entry.title || 'Untitled Entry'}\n${format(entry.createdAt, 'MMMM d, yyyy')}\n\n${entry.content}`;
+    const plainContent = entry.content.replace(/<[^>]*>/g, '');
+    const textToCopy = `${entry.title || 'Untitled Entry'}\n${format(entry.createdAt, 'MMMM d, yyyy')}\n\n${plainContent}`;
     
     // Web Share API
     if (navigator.share) {

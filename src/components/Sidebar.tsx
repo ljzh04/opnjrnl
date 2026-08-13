@@ -2,6 +2,7 @@ import { JournalEntry, MinimalTheme } from '../types';
 import { format } from 'date-fns';
 import { MOOD_SCALE } from '../themeData';
 import { registerDeviceLock } from '../lib/webauthn';
+import { driveStatusMeta, type DriveStatus } from '../lib/driveStatus';
 import { 
   Plus, 
   Search, 
@@ -56,15 +57,17 @@ interface SidebarProps {
   onClearAllData?: (options?: { deleteCloudBackup?: boolean }) => void;
   onConnectDrive?: () => void;
   onManualSync?: () => void;
+  onDisconnectDrive?: () => void;
+  onLogoutAndWipe?: () => void;
   driveConnected?: boolean;
   isSyncingBackground?: boolean;
-  isRefreshingToken?: boolean;
+  driveStatus?: DriveStatus;
+  lastBackupAt?: number | null;
   autoRefreshEnabled?: boolean;
   onToggleAutoRefresh?: (enabled: boolean) => void;
-  syncError?: boolean;
   currentUser?: any;
-  appPassword?: string | null;
-  onUpdateAppPassword?: (pwd: string | null) => void;
+  hasPassword?: boolean;
+  onSetPassword?: (pwd: string | null) => Promise<void>;
   systemLockId?: string | null;
   onUpdateSystemLock?: (id: string | null) => void;
   notificationsEnabled?: boolean;
@@ -100,15 +103,17 @@ const Sidebar = memo(function Sidebar({
   onClearAllData,
   onConnectDrive,
   onManualSync,
+  onDisconnectDrive,
+  onLogoutAndWipe,
   driveConnected,
   isSyncingBackground,
-  isRefreshingToken,
+  driveStatus,
+  lastBackupAt,
   autoRefreshEnabled,
   onToggleAutoRefresh,
-  syncError,
   currentUser,
-  appPassword,
-  onUpdateAppPassword,
+  hasPassword,
+  onSetPassword,
   systemLockId,
   onUpdateSystemLock,
   notificationsEnabled,
@@ -130,6 +135,8 @@ const Sidebar = memo(function Sidebar({
   const setSettingsActive = onToggleSettings !== undefined ? onToggleSettings : setLocalShowSettings;
 
   const [showAccountDropdown, setShowAccountDropdown] = useState(false);
+
+  const driveMeta = driveStatusMeta(driveStatus ?? 'disconnected', lastBackupAt ?? null);
 
   // Updates State for Github
   const CURRENT_COMMIT_HASH = "8a2f4da";
@@ -294,19 +301,9 @@ const Sidebar = memo(function Sidebar({
               {/* Status Indicator Dot */}
               {currentUser && (
                 <div 
-                  className={`absolute -bottom-0.5 -right-0.5 w-[14px] h-[14px] rounded-full border-[2.5px] border-solid z-10 transition-colors duration-300 ${
-                    isRefreshingToken
-                      ? 'bg-purple-400 animate-pulse'
-                      : !driveConnected
-                        ? 'bg-amber-500' 
-                        : syncError 
-                          ? 'bg-rose-500' 
-                          : isSyncingBackground 
-                            ? 'bg-blue-400 animate-pulse' 
-                            : 'bg-emerald-500'
-                  }`}
+                  className={`absolute -bottom-0.5 -right-0.5 w-[14px] h-[14px] rounded-full border-[2.5px] border-solid z-10 transition-colors duration-300 ${driveMeta.dotColor}`}
                   style={{ borderColor: theme.surface }}
-                  title={isRefreshingToken ? "Reconnecting..." : !driveConnected ? "Disconnected" : syncError ? "Backup failed" : isSyncingBackground ? "Backing up..." : "Backed up"}
+                  title={driveMeta.tooltip}
                 />
               )}
 
@@ -347,70 +344,29 @@ const Sidebar = memo(function Sidebar({
                             <span className="font-bold text-sm tracking-tight">{currentUser.displayName || 'Google Account'}</span>
                             <span className="opacity-60 text-[11px] font-medium break-all">{currentUser.email}</span>
                           </div>
-                          
-                          <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full ${
-                            isRefreshingToken
-                              ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400'
-                              : !driveConnected
-                                ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-                                : isSyncingBackground
-                                  ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
-                                  : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                          } font-bold text-[10px] tracking-wide uppercase mt-1`}>
-                            {isRefreshingToken ? (
-                              <>
-                                <RefreshCw className="w-3 h-3 animate-spin" />
-                                Reconnecting...
-                              </>
-                            ) : !driveConnected ? (
-                              <>
-                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
-                                Disconnected
-                              </>
-                            ) : isSyncingBackground ? (
-                              <>
-                                <RefreshCw className="w-3 h-3 animate-spin" />
-                                Backing up to Drive...
-                              </>
+
+                          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/[0.05] dark:bg-white/[0.05] font-bold text-[10px] tracking-wide uppercase mt-1">
+                            {['connecting', 'reconnecting', 'syncing'].includes(driveStatus ?? '') ? (
+                              <RefreshCw className="w-3 h-3 animate-spin" />
                             ) : (
-                              <>
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                                Auto-Backup Active
-                              </>
+                              <span className={`w-1.5 h-1.5 rounded-full ${driveMeta.dotColor}`}></span>
                             )}
+                            {driveMeta.label}
                           </div>
-                          
-                          {driveConnected && (
-                            <div
-                              onClick={() => onToggleAutoRefresh?.(!autoRefreshEnabled)}
-                              className="w-full flex items-center justify-between gap-3 py-2.5 px-0.5 cursor-pointer select-none"
-                            >
-                              <div className="flex flex-col gap-0.5 min-w-0">
-                                <span className="text-xs font-bold tracking-tight">Stay Connected</span>
-                                <span className="text-[10px] opacity-60 leading-tight">Keep your Drive connection alive in the background</span>
-                              </div>
-                              <div
-                                className={`relative w-10 h-[22px] rounded-full shrink-0 transition-colors duration-200 ${autoRefreshEnabled ? 'bg-emerald-500' : 'bg-zinc-300 dark:bg-zinc-600'}`}
-                              >
-                                <div
-                                  className={`absolute top-[2px] left-[2px] w-[18px] h-[18px] rounded-full bg-white shadow-sm transition-transform duration-200 ${autoRefreshEnabled ? 'translate-x-[18px]' : ''}`}
-                                />
-                              </div>
-                            </div>
-                          )}
-                          
+
                           <div className="w-full border-t my-2" style={{ borderColor: theme.surfaceBorder }} />
-                          
+
                           {driveConnected ? (
                             <button
                               onClick={() => {
                                 setShowAccountDropdown(false);
                                 onManualSync?.();
                               }}
-                              className="w-full py-3 px-4 rounded-xl font-bold tracking-wide transition-all bg-blue-600 hover:bg-blue-700 active:scale-95 text-white cursor-pointer shadow-sm text-center mb-1 flex items-center justify-center gap-2"
+                              disabled={isSyncingBackground}
+                              className="w-full py-3 px-4 rounded-xl font-bold tracking-wide transition-all bg-blue-600 hover:bg-blue-700 active:scale-95 text-white cursor-pointer shadow-sm text-center flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
                             >
-                              <RefreshCw className="w-4 h-4" />
-                              Backup Now
+                              <RefreshCw className={`w-4 h-4 ${isSyncingBackground ? 'animate-spin' : ''}`} />
+                              {isSyncingBackground ? 'Backing up…' : 'Back up now'}
                             </button>
                           ) : (
                             <button
@@ -418,7 +374,7 @@ const Sidebar = memo(function Sidebar({
                                 setShowAccountDropdown(false);
                                 onConnectDrive?.();
                               }}
-                              className="w-full py-3 px-4 rounded-xl font-bold tracking-wide transition-all bg-amber-500 hover:bg-amber-600 active:scale-95 text-white cursor-pointer shadow-sm text-center mb-1 flex items-center justify-center gap-2"
+                              className="w-full py-3 px-4 rounded-xl font-bold tracking-wide transition-all bg-amber-500 hover:bg-amber-600 active:scale-95 text-white cursor-pointer shadow-sm text-center flex items-center justify-center gap-2"
                             >
                               <RefreshCw className="w-4 h-4" />
                               Reconnect
@@ -428,19 +384,31 @@ const Sidebar = memo(function Sidebar({
                           <button
                             onClick={() => {
                               setShowAccountDropdown(false);
-                              if (!driveConnected) {
-                                // If they are not connected to drive, they are just signed into firebase but the token expired. Let's sign out completely
-                                import('../lib/auth').then(({ logout }) => {
-                                  logout();
-                                  window.location.reload();
-                                });
-                              } else {
-                                onConnectDrive?.();
-                              }
+                              onToggleSettings?.(true);
                             }}
-                            className="w-full py-3 px-4 rounded-xl font-bold tracking-wide transition-all bg-rose-500 hover:bg-rose-600 active:scale-95 text-white cursor-pointer shadow-sm text-center"
+                            className="w-full py-3 px-4 rounded-xl font-bold tracking-wide transition-all bg-black/[0.05] dark:bg-white/[0.05] hover:bg-black/[0.1] dark:hover:bg-white/[0.1] active:scale-95 cursor-pointer shadow-sm text-center"
                           >
-                            {driveConnected ? "Disconnect from Drive" : "Sign Out"}
+                            Manage backup
+                          </button>
+
+                          <button
+                            onClick={() => {
+                              setShowAccountDropdown(false);
+                              onDisconnectDrive?.();
+                            }}
+                            className="w-full py-2.5 px-4 rounded-xl font-bold tracking-wide transition-all text-rose-500 bg-rose-500/10 hover:bg-rose-500/20 active:scale-95 cursor-pointer text-center border border-rose-500/20"
+                          >
+                            Disconnect
+                          </button>
+
+                          <button
+                            onClick={() => {
+                              setShowAccountDropdown(false);
+                              onLogoutAndWipe?.();
+                            }}
+                            className="text-[10px] font-bold tracking-wider uppercase opacity-50 hover:opacity-100 transition-opacity p-1.5 cursor-pointer"
+                          >
+                            Log out & erase this device
                           </button>
                         </div>
                       ) : (
@@ -634,7 +602,7 @@ const Sidebar = memo(function Sidebar({
                   <div className="flex flex-col gap-2">
                     <div className="flex justify-between items-center">
                       <span className="font-semibold tracking-wide">Journal password</span>
-                      {!appPassword && !showPasswordSetup && (
+                      {!hasPassword && !showPasswordSetup && (
                         <button
                           className="px-4 py-2.5 bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 rounded-lg opacity-85 hover:opacity-100 transition-colors cursor-pointer interactive-target-44 flex items-center justify-center font-medium"
                           onClick={() => setShowPasswordSetup(true)}
@@ -642,7 +610,7 @@ const Sidebar = memo(function Sidebar({
                           Set password
                         </button>
                       )}
-                      {appPassword && !showPasswordRemove && (
+                      {hasPassword && !showPasswordRemove && (
                         <button
                           className="px-4 py-2.5 bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 rounded-lg opacity-85 hover:opacity-100 transition-colors cursor-pointer interactive-target-44 flex items-center justify-center font-medium"
                           onClick={() => setShowPasswordRemove(true)}
@@ -651,16 +619,16 @@ const Sidebar = memo(function Sidebar({
                         </button>
                       )}
                     </div>
-                    
+
                     {showPasswordSetup && (
                       <form 
                         className="flex flex-col gap-2.5 mt-2.5 pt-2.5 border-t"
                         style={{ borderColor: theme.surfaceBorder }}
-                        onSubmit={(e) => {
+                        onSubmit={async (e) => {
                           e.preventDefault();
                           const val = (e.currentTarget.elements.namedItem('newpwd') as HTMLInputElement).value;
                           if (val) {
-                            onUpdateAppPassword?.(val);
+                            await onSetPassword?.(val);
                             setShowPasswordSetup(false);
                           }
                         }}
@@ -683,24 +651,25 @@ const Sidebar = memo(function Sidebar({
                     {showPasswordRemove && (
                       <div className="flex flex-col gap-2 mt-2 pt-2 border-t" style={{ borderColor: theme.surfaceBorder }}>
                         <p className="opacity-80">Are you sure you want to remove the password?</p>
+                        <p className="opacity-60 text-[10px]">Entries will be stored without encryption.</p>
                         <div className="flex justify-end gap-2 mt-1">
-                          <button onClick={() => setShowPasswordRemove(false)} className="px-3 py-1.5 opacity-60">Cancel</button>
-                          <button onClick={() => { onUpdateAppPassword?.(null); setShowPasswordRemove(false); }} className="px-3 py-1.5 rounded bg-rose-500 text-white font-medium shadow-sm transition-all active:scale-95">Remove</button>
+                          <button onClick={() => setShowPasswordRemove(false)} className="px-3 py-1.5 opacity-60 cursor-pointer">Cancel</button>
+                          <button onClick={async () => { await onSetPassword?.(null); setShowPasswordRemove(false); }} className="px-3 py-1.5 rounded bg-rose-500 text-white font-medium shadow-sm transition-all active:scale-95 cursor-pointer">Remove</button>
                         </div>
                       </div>
                     )}
 
-                    {appPassword && !showPasswordRemove && (
+                    {hasPassword && !showPasswordRemove && (
                       <div className="flex justify-between items-center mt-1">
                         <span className="opacity-60">Status</span>
-                        <span className="text-emerald-500 font-medium">Protected (Custom Password)</span>
+                        <span className="text-emerald-500 font-medium font-sans">Protected (Encrypted)</span>
                       </div>
                     )}
                   </div>
                 </div>
               </div>
 
-               {/* Push Notifications */}
+                {/* Push Notifications */}
                <div className="flex flex-col gap-3">
                  <span className="text-[10px] font-bold tracking-widest uppercase opacity-40">Reminders</span>
                  <div 
@@ -869,21 +838,88 @@ const Sidebar = memo(function Sidebar({
                 </div>
               </div>
 
-              {/* Cloud Storage Backups Disclosure & Privacy Footer */}
+              {/* Cloud Backup Settings */}
               <div 
-                className="rounded-xl border p-4 flex flex-col gap-2.5 text-[10px] leading-relaxed opacity-60 mt-2" 
+                className="rounded-xl border p-4 flex flex-col gap-3 text-xs" 
                 style={{ borderColor: theme.surfaceBorder, backgroundColor: theme.surface }}
               >
-                <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-xs opacity-80">
-                  <Cloud className="w-3.5 h-3.5 text-blue-500" />
-                  <span>Google Drive Privacy</span>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-[10px] opacity-80">
+                    <Cloud className="w-3.5 h-3.5 text-blue-500" />
+                    <span>Cloud backup</span>
+                  </div>
+                  {currentUser && (
+                    <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide opacity-80">
+                      {['connecting', 'reconnecting', 'syncing'].includes(driveStatus ?? '') ? (
+                        <RefreshCw className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <span className={`w-1.5 h-1.5 rounded-full ${driveMeta.dotColor}`}></span>
+                      )}
+                      {driveMeta.label}
+                    </span>
+                  )}
                 </div>
-                <p>
-                  Backups are saved to a hidden folder inside your own Google Drive. The app cannot see, edit, or delete any of your other Drive files.
-                </p>
-                <div className="border-t pt-2 flex items-center justify-between mt-1" style={{ borderColor: theme.surfaceBorder }}>
-                  <span>Managed via top-right profile icon</span>
-                </div>
+
+                {currentUser ? (
+                  <>
+                    <p className="text-[10.5px] opacity-70 leading-relaxed">
+                      Encrypted backups of your journal are saved to a hidden folder inside your own Google Drive. The app cannot see, edit, or delete any of your other Drive files.
+                    </p>
+
+                    <button
+                      onClick={onManualSync}
+                      disabled={isSyncingBackground}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold tracking-wide transition-all cursor-pointer interactive-target-44 disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isSyncingBackground ? 'animate-spin' : ''}`} />
+                      {isSyncingBackground ? 'Backing up…' : 'Back up now'}
+                    </button>
+
+                    <div className="border-t pt-3 flex flex-col gap-2" style={{ borderColor: theme.surfaceBorder }}>
+                      <label className="flex justify-between items-center cursor-pointer py-1 select-none">
+                        <div className="flex flex-col gap-0.5">
+                          <span className="font-semibold tracking-wide">Stay Connected</span>
+                          <span className="text-[9.5px] opacity-55 leading-tight">Keep connection alive in background (experimental)</span>
+                        </div>
+                        <div
+                          onClick={() => onToggleAutoRefresh?.(!autoRefreshEnabled)}
+                          className={`relative w-10 h-[22px] rounded-full shrink-0 transition-colors duration-200 ${autoRefreshEnabled ? 'bg-emerald-500' : 'bg-zinc-300 dark:bg-zinc-600'}`}
+                        >
+                          <div
+                            className={`absolute top-[2px] left-[2px] w-[18px] h-[18px] rounded-full bg-white shadow-sm transition-transform duration-200 ${autoRefreshEnabled ? 'translate-x-[18px]' : ''}`}
+                          />
+                        </div>
+                      </label>
+
+                      <button
+                        onClick={onDisconnectDrive}
+                        className="w-full py-2.5 px-4 rounded-xl text-rose-500 bg-rose-500/10 hover:bg-rose-500/20 active:scale-95 font-bold tracking-wide transition-all cursor-pointer border border-rose-500/20"
+                      >
+                        Disconnect
+                      </button>
+
+                      <button
+                        onClick={onLogoutAndWipe}
+                        className="w-full py-2 px-4 text-[10px] font-bold uppercase tracking-wider opacity-55 hover:opacity-100 transition-opacity cursor-pointer"
+                      >
+                        Log out & erase this device
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-[10.5px] opacity-70 leading-relaxed">
+                      Backups are saved to a hidden folder inside your own Google Drive. The app cannot see, edit, or delete any of your other Drive files.
+                    </p>
+                    <button
+                      onClick={onConnectDrive}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold tracking-wide transition-all cursor-pointer interactive-target-44"
+                    >
+                      <Cloud className="w-4 h-4 shrink-0" />
+                      <span>Connect to Google Drive</span>
+                    </button>
+                  </>
+                )}
               </div>
 
 

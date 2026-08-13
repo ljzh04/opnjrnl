@@ -17,6 +17,8 @@ import { initAuth, googleSignIn, getAccessToken, logout, startTokenRefresh, stop
 import { registerDeviceLock, verifyDeviceLock } from './lib/webauthn';
 import { mergeEntries } from './lib/syncMerge';
 import { clearData } from './lib/clearData';
+import { setupEncryption, tryUnlock, encrypt, decrypt } from './lib/encryption';
+import type { DriveStatus } from './lib/driveStatus';
 
 const ENTRIES_STORAGE_KEY = 'minimal-journal-entries';
 const THEME_STORAGE_KEY = 'minimal-journal-theme';
@@ -24,6 +26,8 @@ const DRIVE_FILE_ID_KEY = 'minimal-journal-drive-file-id';
 const APP_PASSWORD_KEY = 'minimal-journal-password';
 const APP_SYSLOCK_KEY = 'minimal-journal-syslock';
 const APP_SETTINGS_KEY = 'minimal-journal-settings';
+const ENC_SALT_KEY = 'minimal-journal-enc-salt';
+const ENC_VERIFY_KEY = 'minimal-journal-enc-verify';
 const ARCHIVE_FILE_NAME = 'opnjrnl_archive.json';
 const LOCAL_ARCHIVE_KEY = 'minimal-journal-local-archive';
 
@@ -90,9 +94,13 @@ export default function App() {
     }
   }, [activeEntryId, entries]);
 
-  // App Lock & Settings
+  // Encryption & Lock
+  const encryptionKeyRef = useRef<CryptoKey | null>(null);
+  const rawEncryptedRef = useRef<string | null>(null);
+  const [hasPassword, setHasPassword] = useState(false);
+  const [passwordAttempts, setPasswordAttempts] = useState(0);
+  const [lockoutUntil, setLockoutUntil] = useState<number | null>(null);
   const [appLocked, setAppLocked] = useState<boolean>(false);
-  const [appPassword, setAppPassword] = useState<string | null>(null);
   const [systemLockId, setSystemLockId] = useState<string | null>(null);
   const [pwdError, setPwdError] = useState<boolean>(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(false);
@@ -120,8 +128,15 @@ export default function App() {
   // Cloud Sync properties
   const [driveConnected, setDriveConnected] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [lastBackupAt, setLastBackupAt] = useState<number | null>(() => {
+    const raw = localStorage.getItem('opnjrnl_last_backup_at');
+    const n = raw ? parseInt(raw, 10) : NaN;
+    return Number.isFinite(n) ? n : null;
+  });
   const [syncErrorMessage, setSyncErrorMessage] = useState<string | null>(null);
   const [showConfirmDisconnect, setShowConfirmDisconnect] = useState(false);
+  const [showLogoutWipeConfirm, setShowLogoutWipeConfirm] = useState(false);
   const [isSyncingBackground, setIsSyncingBackground] = useState(false);
   const [cloudProgressScreen, setCloudProgressScreen] = useState<{ title: string; subtitle: string } | null>(null);
   const [isRefreshingToken, setIsRefreshingToken] = useState(false);
@@ -184,54 +199,70 @@ export default function App() {
   // Initial persistent state restoration
   useEffect(() => {
     Promise.all([
-      get<JournalEntry[]>(ENTRIES_STORAGE_KEY),
+      get<any>(ENTRIES_STORAGE_KEY),
       get<MinimalThemeId>(THEME_STORAGE_KEY),
       get<string | null>(APP_PASSWORD_KEY),
       get<string | null>(APP_SYSLOCK_KEY),
       get<{ notificationsEnabled: boolean, notificationTime: string }>(APP_SETTINGS_KEY),
+      get<string | null>(ENC_SALT_KEY),
+      get<string | null>(ENC_VERIFY_KEY),
       getSavedDirectoryHandleInfo()
-    ]).then(async ([storedEntries, storedThemeId, storedPassword, storedSyslock, storedSettings, dirHandleInfo]) => {
-      const polished = (storedEntries || []).map(entry => ({
-        ...entry,
-        tags: entry.tags || []
-      }));
+    ]).then(async ([storedEntries, storedThemeId, storedPassword, storedSyslock, storedSettings, storedEncSalt, storedVerifyToken, dirHandleInfo]) => {
+      const isEncrypted = storedEncSalt && storedVerifyToken;
 
-      if (dirHandleInfo) {
-        setDirHandle(dirHandleInfo.handle);
-        if (!dirHandleInfo.requiresPermission) {
-          try {
-            const dirEntries = await loadEntriesFromDirectory(dirHandleInfo.handle);
-            if (dirEntries.length > 0) {
-              const merged = mergeEntries(polished, dirEntries);
-              setEntries(merged);
-            } else if (polished.length > 0) {
-              setEntries(polished);
+      if (isEncrypted) {
+        rawEncryptedRef.current = storedEntries?.encrypted || null;
+        setHasPassword(true);
+      } else {
+        const polished = (storedEntries || []).map(entry => ({
+          ...entry,
+          tags: entry.tags || []
+        }));
+
+        if (dirHandleInfo) {
+          setDirHandle(dirHandleInfo.handle);
+          if (!dirHandleInfo.requiresPermission) {
+            try {
+              const dirEntries = await loadEntriesFromDirectory(dirHandleInfo.handle);
+              if (dirEntries.length > 0) {
+                const merged = mergeEntries(polished, dirEntries);
+                setEntries(merged);
+              } else if (polished.length > 0) {
+                setEntries(polished);
+              }
+            } catch {
+              if (polished.length > 0) setEntries(polished);
             }
-          } catch {
+          } else {
             if (polished.length > 0) setEntries(polished);
           }
-        } else {
-          if (polished.length > 0) setEntries(polished);
+        } else if (polished.length > 0) {
+          setEntries(polished);
         }
-      } else if (polished.length > 0) {
-        setEntries(polished);
       }
+
       if (storedThemeId && MINIMAL_THEMES[storedThemeId]) {
         setThemeId(storedThemeId);
       }
-      if (storedPassword) {
-        setAppPassword(storedPassword);
-        setAppLocked(true);
+
+      // Legacy plaintext password migration
+      if (storedPassword && !isEncrypted) {
+        setHasPassword(true);
       }
+
       if (storedSyslock) {
         setSystemLockId(storedSyslock);
-        setAppLocked(true);
+        if (!isEncrypted) setAppLocked(true);
       }
+
       if (storedSettings) {
         setNotificationsEnabled(storedSettings.notificationsEnabled);
         setNotificationTime(storedSettings.notificationTime || "20:00");
       }
-      isDataReadyRef.current = true;
+
+      if (!isEncrypted) {
+        isDataReadyRef.current = true;
+      }
       setIsLoaded(true);
     }).catch((err) => {
       console.error("Storage load error:", err);
@@ -276,6 +307,23 @@ export default function App() {
     setAutoRefreshEnabledLocal(enabled);
   };
 
+  // Single source of truth for the Drive connection state shown in the UI
+  const driveStatus: DriveStatus = useMemo(() => {
+    if (!currentUser && !isConnecting) return 'disconnected';
+    if (isConnecting) return 'connecting';
+    if (isRefreshingToken) return 'reconnecting';
+    if (isSyncingBackground) return 'syncing';
+    if (syncErrorMessage) return 'error';
+    if (!driveConnected) return 'needs-reconnect';
+    return 'connected';
+  }, [currentUser, isConnecting, isRefreshingToken, isSyncingBackground, syncErrorMessage, driveConnected]);
+
+  const recordBackupSuccess = () => {
+    const now = Date.now();
+    setLastBackupAt(now);
+    localStorage.setItem('opnjrnl_last_backup_at', now.toString());
+  };
+
   const findDriveBackupFile = async (accessToken: string): Promise<string | null> => {
     const fileQ = encodeURIComponent("name = 'opnjrnl_backup.json' and trashed = false");
     const fileRes = await fetch(`https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${fileQ}&fields=files(id)`, {
@@ -296,6 +344,11 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data)) return data;
+        // Encrypted format
+        if (data?.encrypted && encryptionKeyRef.current) {
+          const decryptedJson = await decrypt(encryptionKeyRef.current, data.encrypted);
+          return JSON.parse(decryptedJson);
+        }
       }
     } catch (e) {
       console.warn("Failed to download Drive backup:", e);
@@ -312,9 +365,17 @@ export default function App() {
     return data.files?.[0]?.id || null;
   };
 
+  const drivePayload = async (entries: JournalEntry[]): Promise<string> => {
+    const key = encryptionKeyRef.current;
+    if (key) {
+      return JSON.stringify({ encrypted: await encrypt(key, JSON.stringify(entries)) });
+    }
+    return JSON.stringify(entries);
+  };
+
   const archiveEntries = async (accessToken: string, entries: JournalEntry[]): Promise<void> => {
     const archiveFileId = await findDriveFileByName(accessToken, ARCHIVE_FILE_NAME);
-    const payload = JSON.stringify(entries);
+    const payload = await drivePayload(entries);
     if (archiveFileId) {
       await fetch(`https://www.googleapis.com/upload/drive/v3/files/${archiveFileId}?uploadType=media`, {
         method: 'PATCH',
@@ -334,6 +395,16 @@ export default function App() {
     }
   };
 
+  const persistEntries = async (data: JournalEntry[]) => {
+    const key = encryptionKeyRef.current;
+    if (key) {
+      const encryptedStr = await encrypt(key, JSON.stringify(data));
+      await set(ENTRIES_STORAGE_KEY, { encrypted: encryptedStr });
+    } else {
+      await set(ENTRIES_STORAGE_KEY, data);
+    }
+  };
+
   const createOrUploadBackup = async (dataToSync: JournalEntry[], accessToken: string, existingFileId: string | null) => {
     // ponytail: archives previous cloud state to Drive before overwriting
     if (existingFileId) {
@@ -347,7 +418,7 @@ export default function App() {
       }
     }
     const mimeType = 'application/json';
-    const dataStr = JSON.stringify(dataToSync);
+    const dataStr = await drivePayload(dataToSync);
     
     if (existingFileId) {
       const updateRes = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=media`, {
@@ -383,6 +454,7 @@ export default function App() {
         await set(DRIVE_FILE_ID_KEY, createdFile.id);
       }
     }
+      recordBackupSuccess();
   };
 
   const handleResolveMerge = async () => {
@@ -393,7 +465,7 @@ export default function App() {
     const merged = mergeEntries(entriesRef.current, cloudEntries);
     
     setEntries(merged);
-    await set(ENTRIES_STORAGE_KEY, merged);
+    await persistEntries(merged);
     
     await createOrUploadBackup(merged, accessToken, activeFileId);
     
@@ -423,7 +495,7 @@ export default function App() {
     
     // Save cloud entries locally
     setEntries(cloudEntries);
-    await set(ENTRIES_STORAGE_KEY, cloudEntries);
+    await persistEntries(cloudEntries);
     
     // Establish DRIVE_FILE_ID_KEY
     if (activeFileId) {
@@ -437,11 +509,7 @@ export default function App() {
   };
 
   const handleConnectDrive = async () => {
-    if (driveConnected) {
-      setShowConfirmDisconnect(true);
-      return;
-    }
-
+    setIsConnecting(true);
     setSyncErrorMessage(null);
     setCloudProgressScreen({ title: 'Connecting to Google Drive', subtitle: 'Signing in and connecting to your Drive. This will take just a moment...' });
     try {
@@ -458,14 +526,23 @@ export default function App() {
         
         // If there's a pre-existing backup with entries, show user management option dialog
         if (activeFileId && cloudEntries.length > 0) {
-          setSyncChoiceData({
-            accessToken,
-            user: res.user,
-            localCount: entriesRef.current.length,
-            cloudCount: cloudEntries.length,
-            cloudEntries,
-            activeFileId
-          });
+          if (entriesRef.current.length === 0) {
+            // ponytail: empty device → silently adopt the cloud state, no merge prompt
+            setEntries(cloudEntries);
+            await persistEntries(cloudEntries);
+            await set(DRIVE_FILE_ID_KEY, activeFileId);
+            setDriveConnected(true);
+            setCurrentUser(res.user);
+          } else {
+            setSyncChoiceData({
+              accessToken,
+              user: res.user,
+              localCount: entriesRef.current.length,
+              cloudCount: cloudEntries.length,
+              cloudEntries,
+              activeFileId
+            });
+          }
         } else {
           // No cloud content or new account. Direct upload local state & connect
           await createOrUploadBackup(entriesRef.current, accessToken, activeFileId);
@@ -477,8 +554,62 @@ export default function App() {
       console.error("Could not connect to Google accounts:", err);
       setSyncErrorMessage("Failed to connect to Google Drive. Please try again.");
     } finally {
+      setIsConnecting(false);
       setCloudProgressScreen(null);
     }
+  };
+
+  const handleDisconnectDrive = async () => {
+    try {
+      await logout();
+      setDriveConnected(false);
+      setCurrentUser(null);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setShowConfirmDisconnect(false);
+    }
+  };
+
+  const handleLogoutAndWipe = async () => {
+    // ponytail: reuse clearData (local-only) so the wiped device auto-restores
+    // from the Drive backup on next connect instead of hitting the merge prompt
+    set(LOCAL_ARCHIVE_KEY, entriesRef.current).catch(console.error);
+    if (syncTimeoutRef.current) {
+      clearTimeout(syncTimeoutRef.current);
+      syncTimeoutRef.current = null;
+    }
+
+    await clearData(
+      {
+        getAccessToken,
+        driveFileIdGet: () => get<string>(DRIVE_FILE_ID_KEY),
+        driveFileIdDel: () => del(DRIVE_FILE_ID_KEY),
+        logout,
+        driveFetch: fetch,
+        entriesDel: () => del(ENTRIES_STORAGE_KEY),
+        appPasswordDel: () => del(APP_PASSWORD_KEY),
+        syslockDel: () => del(APP_SYSLOCK_KEY),
+        encSaltDel: () => del(ENC_SALT_KEY),
+        encVerifyDel: () => del(ENC_VERIFY_KEY),
+        localStorageRemoveItem: (key: string) => localStorage.removeItem(key),
+      },
+      { deleteCloudBackup: false },
+    );
+
+    setDriveConnected(false);
+    setCurrentUser(null);
+    setEntries([]);
+    setActiveEntryId(null);
+    clearUndoState();
+    encryptionKeyRef.current = null;
+    setHasPassword(false);
+    setSystemLockId(null);
+    setLastBackupAt(null);
+    localStorage.removeItem('opnjrnl_last_backup_at');
+    localStorage.removeItem('opnjrnl_google_token_saved_at');
+    localStorage.removeItem('opnjrnl_scope_version');
+    localStorage.removeItem('opnjrnl_auto_refresh');
   };
 
   const handleManualSync = async () => {
@@ -498,15 +629,21 @@ export default function App() {
       
       // If we found remote entries, pop the choices dialog. Otherwise just push local state.
       if (activeFileId && cloudEntries.length > 0) {
-        setSyncChoiceData({
-          accessToken,
-          user: currentUser,
-          localCount: entriesRef.current.length,
-          cloudCount: cloudEntries.length,
-          cloudEntries,
-          activeFileId,
-          isManualSync: true
-        });
+        if (entriesRef.current.length === 0) {
+          // ponytail: empty device → silently adopt the cloud state, no merge prompt
+          setEntries(cloudEntries);
+          await persistEntries(cloudEntries);
+        } else {
+          setSyncChoiceData({
+            accessToken,
+            user: currentUser,
+            localCount: entriesRef.current.length,
+            cloudCount: cloudEntries.length,
+            cloudEntries,
+            activeFileId,
+            isManualSync: true
+          });
+        }
       } else {
         await createOrUploadBackup(entriesRef.current, accessToken, activeFileId);
       }
@@ -540,9 +677,10 @@ export default function App() {
               Authorization: `Bearer ${accessToken}`,
               'Content-Type': mimeType
             },
-            body: JSON.stringify(dataToSync)
+            body: await drivePayload(dataToSync)
           });
           if (updateRes.status === 200 || updateRes.status === 204) {
+            recordBackupSuccess();
             return;
           }
           if (updateRes.status === 404) {
@@ -564,16 +702,17 @@ export default function App() {
           if (cloudEntries && cloudEntries.length > 0) {
             const merged = mergeEntries(dataToSync, cloudEntries);
             setEntries(merged);
-            set(ENTRIES_STORAGE_KEY, merged).catch(console.error);
+            persistEntries(merged).catch(console.error);
             await fetch(`https://www.googleapis.com/upload/drive/v3/files/${activeFileId}?uploadType=media`, {
               method: 'PATCH',
               headers: {
                 Authorization: `Bearer ${accessToken}`,
                 'Content-Type': mimeType
               },
-              body: JSON.stringify(merged)
+              body: await drivePayload(merged)
             });
             await set(DRIVE_FILE_ID_KEY, activeFileId);
+            recordBackupSuccess();
             return;
           }
         }
@@ -585,9 +724,10 @@ export default function App() {
             Authorization: `Bearer ${accessToken}`,
             'Content-Type': mimeType
           },
-          body: JSON.stringify(dataToSync)
+          body: await drivePayload(dataToSync)
         });
         await set(DRIVE_FILE_ID_KEY, activeFileId);
+        recordBackupSuccess();
 
       } else {
         // No backup exists yet, only create if we have data to upload
@@ -600,7 +740,7 @@ export default function App() {
 
           const form = new FormData();
           form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-          form.append('file', new Blob([JSON.stringify(dataToSync)], { type: mimeType }));
+          form.append('file', new Blob([await drivePayload(dataToSync)], { type: mimeType }));
 
           const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
             method: 'POST',
@@ -612,6 +752,7 @@ export default function App() {
           const createdFile = await res.json();
           if (createdFile.id) {
             await set(DRIVE_FILE_ID_KEY, createdFile.id);
+            recordBackupSuccess();
           }
         }
       }
@@ -628,7 +769,14 @@ export default function App() {
   // Sync entries to storage
   useEffect(() => {
     if (isLoaded && isDataReadyRef.current) {
-      set(ENTRIES_STORAGE_KEY, entries).catch(console.error);
+      const key = encryptionKeyRef.current;
+      if (key) {
+        encrypt(key, JSON.stringify(entries)).then(encryptedStr => {
+          set(ENTRIES_STORAGE_KEY, { encrypted: encryptedStr }).catch(console.error);
+        });
+      } else {
+        set(ENTRIES_STORAGE_KEY, entries).catch(console.error);
+      }
 
       // Debounced Drive Sync — always merge-first to prevent overwriting cloud with stale local data
       if (driveConnected) {
@@ -745,6 +893,8 @@ export default function App() {
         entriesDel: () => del(ENTRIES_STORAGE_KEY),
         appPasswordDel: () => del(APP_PASSWORD_KEY),
         syslockDel: () => del(APP_SYSLOCK_KEY),
+        encSaltDel: () => del(ENC_SALT_KEY),
+        encVerifyDel: () => del(ENC_VERIFY_KEY),
         localStorageRemoveItem: (key: string) => localStorage.removeItem(key),
       },
       options,
@@ -755,7 +905,8 @@ export default function App() {
     setEntries([]);
     setActiveEntryId(null);
     clearUndoState();
-    setAppPassword(null);
+    encryptionKeyRef.current = null;
+    setHasPassword(false);
     setSystemLockId(null);
   };
 
@@ -842,7 +993,7 @@ export default function App() {
       const data = await downloadDriveBackup(token, id);
       if (!data || data.length === 0) { alert('Archive is empty.'); return; }
       setEntries(data);
-      await set(ENTRIES_STORAGE_KEY, data);
+      await persistEntries(data);
       alert(`Restored ${data.length} entries from archive.`);
     } catch (e) {
       console.error(e);
@@ -858,7 +1009,7 @@ export default function App() {
       if (!archived || archived.length === 0) { alert('No local archive found.'); return; }
       if (!confirm(`Restore ${archived.length} entries from local archive? This replaces all current entries.`)) return;
       setEntries(archived);
-      await set(ENTRIES_STORAGE_KEY, archived);
+      await persistEntries(archived);
       alert(`Restored ${archived.length} entries from local archive.`);
     } catch (e) {
       console.error(e);
@@ -916,7 +1067,65 @@ export default function App() {
     );
   }
 
-  if (appLocked) {
+  const handleUnlock = async (password: string): Promise<boolean> => {
+    if (lockoutUntil && Date.now() < lockoutUntil) return false;
+
+    try {
+      // Migration path: legacy plaintext password
+      const legacyPwd = await get<string | null>(APP_PASSWORD_KEY);
+      if (legacyPwd) {
+        if (password !== legacyPwd) {
+          setPasswordAttempts(p => { const n = p + 1; if (n >= 5) setLockoutUntil(Date.now() + 60000 * Math.pow(2, n - 5)); return n; });
+          return false;
+        }
+        // Migrate: setup encryption with existing password
+        const { encryptionSalt, verifyToken } = await setupEncryption(password);
+        const key = await tryUnlock(password, encryptionSalt, verifyToken);
+        if (key) {
+          encryptionKeyRef.current = key;
+          await set(ENC_SALT_KEY, encryptionSalt);
+          await set(ENC_VERIFY_KEY, verifyToken);
+          await del(APP_PASSWORD_KEY);
+          if (rawEncryptedRef.current) {
+            const decryptedJson = await decrypt(key, rawEncryptedRef.current);
+            const parsed = JSON.parse(decryptedJson) as JournalEntry[];
+            setEntries(parsed.map(e => ({ ...e, tags: e.tags || [] })));
+          }
+          isDataReadyRef.current = true;
+          setPwdError(false);
+          return true;
+        }
+        return false;
+      }
+
+      // Standard encrypted unlock
+      const encSalt = await get<string | null>(ENC_SALT_KEY);
+      const verifyToken = await get<string | null>(ENC_VERIFY_KEY);
+      if (!encSalt || !verifyToken) return false;
+
+      const key = await tryUnlock(password, encSalt, verifyToken);
+      if (key) {
+        encryptionKeyRef.current = key;
+        if (rawEncryptedRef.current) {
+          const decryptedJson = await decrypt(key, rawEncryptedRef.current);
+          const parsed = JSON.parse(decryptedJson) as JournalEntry[];
+          setEntries(parsed.map(e => ({ ...e, tags: e.tags || [] })));
+        }
+        isDataReadyRef.current = true;
+        setPwdError(false);
+        setPasswordAttempts(0);
+        setLockoutUntil(null);
+        return true;
+      }
+
+      setPasswordAttempts(p => { const n = p + 1; if (n >= 5) setLockoutUntil(Date.now() + 60000 * Math.pow(2, n - 5)); return n; });
+      return false;
+    } catch {
+      return false;
+    }
+  };
+
+  if (hasPassword) {
     return (
       <div 
         className="h-[100dvh] w-full flex flex-col gap-6 items-center justify-center font-sans text-xs tracking-wider select-none px-6"
@@ -927,38 +1136,16 @@ export default function App() {
         </div>
         <div className="flex flex-col items-center gap-2">
           <h1 className="font-serif text-xl tracking-tight">Journal locked</h1>
-          <p className="opacity-50">Authenticate to continue</p>
+          <p className="opacity-50">Enter your password to continue</p>
         </div>
         
-        {systemLockId && (
-          <button 
-            type="button"
-            onClick={async () => {
-              const success = await verifyDeviceLock(systemLockId);
-              if (success) {
-                setAppLocked(false);
-                setPwdError(false);
-              }
-            }}
-            className="w-full max-w-[240px] px-4 py-3 rounded-lg font-bold tracking-widest uppercase transition-all mt-4 shadow-sm active:scale-95 text-white"
-            style={{ backgroundColor: currentTheme.accent }}
-          >
-            Use device lock
-          </button>
-        )}
-
-        {appPassword && (
         <form 
-          className="flex flex-col gap-3 w-full max-w-[240px] mt-2"
-          onSubmit={(e) => {
+          className="flex flex-col gap-3 w-full max-w-[240px]"
+          onSubmit={async (e) => {
             e.preventDefault();
             const val = (e.currentTarget.elements.namedItem('pwd') as HTMLInputElement).value;
-            if (val === appPassword) {
-              setAppLocked(false);
-              setPwdError(false);
-            } else {
-              setPwdError(true);
-            }
+            const ok = await handleUnlock(val);
+            setPwdError(!ok);
           }}
         >
           <div>
@@ -968,6 +1155,7 @@ export default function App() {
               placeholder="Password" 
               autoFocus
               onChange={() => setPwdError(false)}
+              disabled={!!(lockoutUntil && Date.now() < lockoutUntil)}
               className="w-full px-4 py-3 rounded-lg border text-center tracking-widest outline-none focus:border-zinc-400 transition-all font-mono"
               style={{ 
                 borderColor: pwdError ? '#f43f5e' : currentTheme.surfaceBorder, 
@@ -975,17 +1163,24 @@ export default function App() {
                 color: currentTheme.textPrimary 
               }}
             />
-            {pwdError && <p className="text-zinc-600 dark:text-zinc-400 text-[10px] mt-2 text-center">Incorrect password</p>}
+            {lockoutUntil && Date.now() < lockoutUntil && (
+              <p className="text-zinc-500 text-[10px] mt-2 text-center">
+                Too many attempts. Try again later.
+              </p>
+            )}
+            {pwdError && !(lockoutUntil && Date.now() < lockoutUntil) && (
+              <p className="text-zinc-600 dark:text-zinc-400 text-[10px] mt-2 text-center">Incorrect password</p>
+            )}
           </div>
-            <button 
-              type="submit"
-              className="w-full px-4 py-3 rounded-lg font-bold tracking-widest uppercase transition-all my-2 shadow-sm active:scale-95 text-white opacity-90"
-              style={{ backgroundColor: currentTheme.accent }}
-            >
-              Unlock
-            </button>
-          </form>
-        )}
+          <button 
+            type="submit"
+            disabled={!!(lockoutUntil && Date.now() < lockoutUntil)}
+            className="w-full px-4 py-3 rounded-lg font-bold tracking-widest uppercase transition-all my-2 shadow-sm active:scale-95 text-white opacity-90 disabled:opacity-30"
+            style={{ backgroundColor: currentTheme.accent }}
+          >
+            Unlock
+          </button>
+        </form>
       </div>
     );
   }
@@ -1045,17 +1240,34 @@ export default function App() {
           onClearAllData={handleClearAllData}
           onConnectDrive={handleConnectDrive}
           onManualSync={handleManualSync}
+          onDisconnectDrive={() => setShowConfirmDisconnect(true)}
+          onLogoutAndWipe={() => setShowLogoutWipeConfirm(true)}
           driveConnected={driveConnected}
           isSyncingBackground={isSyncingBackground}
-          isRefreshingToken={isRefreshingToken}
+          driveStatus={driveStatus}
+          lastBackupAt={lastBackupAt}
           autoRefreshEnabled={autoRefreshEnabled}
           onToggleAutoRefresh={handleToggleAutoRefresh}
-          syncError={!!syncErrorMessage}
           currentUser={currentUser}
-          appPassword={appPassword}
-          onUpdateAppPassword={(pwd) => {
-            setAppPassword(pwd);
-            set(APP_PASSWORD_KEY, pwd).catch(console.error);
+          hasPassword={hasPassword}
+          onSetPassword={async (pwd) => {
+            if (pwd) {
+              const { encryptionSalt, verifyToken } = await setupEncryption(pwd);
+              const key = await tryUnlock(pwd, encryptionSalt, verifyToken);
+              if (key) {
+                encryptionKeyRef.current = key;
+                await set(ENC_SALT_KEY, encryptionSalt);
+                await set(ENC_VERIFY_KEY, verifyToken);
+                await persistEntries(entries);
+                setHasPassword(true);
+              }
+            } else {
+              encryptionKeyRef.current = null;
+              await del(ENC_SALT_KEY);
+              await del(ENC_VERIFY_KEY);
+              await persistEntries(entries);
+              setHasPassword(false);
+            }
           }}
           systemLockId={systemLockId}
           onUpdateSystemLock={(id) => {
@@ -1241,20 +1453,60 @@ export default function App() {
                   Keep Connected
                 </button>
                 <button
-                  onClick={async () => {
-                    try {
-                      await logout();
-                      setDriveConnected(false);
-                      setCurrentUser(null);
-                    } catch (e) {
-                      console.error(e);
-                    } finally {
-                      setShowConfirmDisconnect(false);
-                    }
-                  }}
+                  onClick={handleDisconnectDrive}
                   className="py-2.5 px-4 rounded-xl text-center font-bold tracking-tight transition-all bg-rose-500 hover:bg-rose-600 active:scale-95 text-white cursor-pointer shadow-sm text-center inline-flex items-center justify-center text-xs"
                 >
                   Disconnect
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Log Out & Erase Confirmation Custom Dialog */}
+      <AnimatePresence>
+        {showLogoutWipeConfirm && (
+          <div className="fixed inset-0 bg-black/40 dark:bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+            <div 
+              className="absolute inset-0 cursor-default" 
+              onClick={() => setShowLogoutWipeConfirm(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              transition={{ type: "spring", duration: 0.4 }}
+              className="w-full max-w-sm rounded-[24px] p-6.5 shadow-2xl border flex flex-col gap-5 font-sans relative z-10"
+              style={{ backgroundColor: currentTheme.surface, borderColor: currentTheme.surfaceBorder, color: currentTheme.textPrimary }}
+            >
+              <div className="flex gap-4 items-start">
+                <div className="w-11 h-11 shrink-0 rounded-full flex items-center justify-center bg-rose-500/10 text-rose-500">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div className="flex flex-col gap-1.5 min-w-0">
+                  <h3 className="text-base font-bold tracking-tight">Log out & erase this device?</h3>
+                  <p className="opacity-70 text-[11.5px] leading-relaxed">
+                    This removes all entries, archives and settings from this device. Your Google Drive backup is kept, so you can restore your journal on this or any other device by signing in again.
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3 mt-1">
+                <button
+                  onClick={() => setShowLogoutWipeConfirm(false)}
+                  className="py-2.5 px-4 rounded-xl text-center font-bold tracking-tight transition-all hover:bg-black/[0.04] dark:hover:bg-white/[0.04] active:scale-95 border cursor-pointer inline-flex items-center justify-center bg-transparent text-xs"
+                  style={{ borderColor: currentTheme.surfaceBorder, color: currentTheme.textPrimary }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => {
+                    setShowLogoutWipeConfirm(false);
+                    await handleLogoutAndWipe();
+                  }}
+                  className="py-2.5 px-4 rounded-xl text-center font-bold tracking-tight transition-all bg-rose-500 hover:bg-rose-600 active:scale-95 text-white cursor-pointer shadow-sm text-center inline-flex items-center justify-center text-xs"
+                >
+                  Log out & erase
                 </button>
               </div>
             </motion.div>
@@ -1269,9 +1521,6 @@ export default function App() {
             <div 
               className="absolute inset-0 cursor-default" 
               onClick={() => {
-                if (!syncChoiceData.isManualSync) {
-                  logout();
-                }
                 setSyncChoiceData(null);
               }}
             />
@@ -1367,9 +1616,6 @@ export default function App() {
               <div className="flex justify-center pt-2">
                 <button
                   onClick={() => {
-                    if (!syncChoiceData.isManualSync) {
-                      logout();
-                    }
                     setSyncChoiceData(null);
                   }}
                   className="text-[10px] font-bold tracking-wider uppercase opacity-45 hover:opacity-100 transition-opacity p-2 cursor-pointer"
